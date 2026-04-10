@@ -563,7 +563,18 @@ function actualizarAlertaCheckin(){
 // BACKUP COMPLETO
 // ══════════════════════════════════════════════════════════════
 function exportarBackup(){
+  if(typeof currentUser !== "undefined" && currentUser){
+    if(!canDo("exportar_backup")){ toast("⛔ Sin permiso para exportar backup","err"); return; }
+    if(requierePIN("exportar_backup")){
+      pedirPIN("Exportar backup completo", true).then(function(ok){ if(ok) _doExportarBackup(); });
+      return;
+    }
+  }
+  _doExportarBackup();
+}
+function _doExportarBackup(){
   try{
+    try{ _logAudit("EXPORT_BACKUP", { type:"backup" }, null, { fecha:new Date().toISOString() }, window._lastPinMotivo||"", "medium"); }catch(e){}
     var backup = {
       version: "1.0",
       fecha: new Date().toISOString(),
@@ -598,6 +609,18 @@ function exportarBackup(){
 function importarBackup(input){
   var file = input.files[0];
   if(!file) return;
+  if(typeof currentUser !== "undefined" && currentUser){
+    if(!canDo("importar_backup")){ toast("⛔ Sin permiso para importar backup","err"); input.value=""; return; }
+    if(requierePIN("importar_backup")){
+      pedirPIN("Importar backup (sobreescribe TODOS los datos)", true).then(function(ok){
+        if(ok){ _doImportarBackup(file, input); } else { input.value=""; }
+      });
+      return;
+    }
+  }
+  _doImportarBackup(file, input);
+}
+function _doImportarBackup(file, input){
   var reader = new FileReader();
   reader.onload = function(e){
     try{
@@ -624,6 +647,7 @@ function importarBackup(input){
           if(Array.isArray(backup.datos.proactLog)) safeSave("hv_proact_log",backup.datos.proactLog);
           if(backup.datos.proactDisclaimer) safeSave("hv_proact_disclaimer",backup.datos.proactDisclaimer);
           // hv_limpias_hoy no se restaura: es dato con scope de fecha, no histórico
+          try{ _logAudit("IMPORT_BACKUP", { type:"backup" }, null, { fecha:backup.fecha, version:backup.version }, window._lastPinMotivo||"", "high"); }catch(e){}
           toast("Backup restaurado. Sincronizando y recargando...", "ok");
           setTimeout(function(){
             try{ pushLocalToSupabase(); }catch(e){}
@@ -784,6 +808,614 @@ function getHKPIN(){
   // Legacy — ya no se usa PIN único
   return null;
 }
+
+// ══════════════════════════════════════════════════════════════
+// SISTEMA DE USUARIOS, ROLES Y AUDIT LOG (v5.0)
+// ══════════════════════════════════════════════════════════════
+// Modelo: 5 roles (dueno, gerente, recepcion, contabilidad, hk)
+// Login con password al inicio + PIN personal para acciones sensibles
+// Audit log inmutable de todas las acciones críticas
+// ══════════════════════════════════════════════════════════════
+
+// ── DEFINICIÓN DE ROLES ───────────────────────────────────────
+const ROLES_INFO = {
+  dueno:        { label:"Dueño",        ico:"👑", color:"#7c3aed", desc:"Acceso total, único que ve auditoría" },
+  gerente:      { label:"Gerente",      ico:"💼", color:"#0369a1", desc:"Operación completa, sin tocar dinero pasado" },
+  recepcion:    { label:"Recepción",    ico:"🛎", color:"#b45309", desc:"Reservas y check-in/out del día a día" },
+  contabilidad: { label:"Contabilidad", ico:"📊", color:"#15803d", desc:"Solo lectura de finanzas y exportes SII" },
+  hk:           { label:"Housekeeping", ico:"🧹", color:"#be185d", desc:"Solo aplicación de limpieza" }
+};
+
+// ── MATRIZ DE PERMISOS ────────────────────────────────────────
+// true = permitido, "pin" = permitido pero requiere PIN para confirmar, false = denegado
+const PERMISOS = {
+  dueno: { "*": true, "_pin_required": ["eliminar_reserva","eliminar_reserva_futura","eliminar_permanente","modificar_monto","aplicar_descuento","modificar_precio_base","vaciar_papelera","exportar_backup","importar_backup","gestionar_usuarios","configurar_supabase","override_overbooking","modificar_reserva_pasada"] },
+  gerente: {
+    "crear_reserva": true,
+    "modificar_reserva_futura": true,
+    "modificar_reserva_pasada": false,
+    "eliminar_reserva_futura": "pin",
+    "eliminar_reserva_pasada": false,
+    "vaciar_papelera": false,
+    "aplicar_descuento": "pin",
+    "modificar_monto_cobrado": false,
+    "modificar_precio_base": false,
+    "checkin": true,
+    "checkout": true,
+    "registrar_ine": true,
+    "ver_dashboard": true,
+    "ver_finanzas": true,
+    "ver_kpis_avanzados": true,
+    "exportar_sii": true,
+    "exportar_backup": false,
+    "importar_backup": false,
+    "ver_audit_log": false,
+    "gestionar_usuarios": false,
+    "configurar_supabase": false,
+    "override_overbooking": false,
+    "operar_hk": true,
+    "ver_cotizaciones": true,
+    "importar_csv": true
+  },
+  recepcion: {
+    "crear_reserva": true,
+    "modificar_reserva_futura": true,
+    "modificar_reserva_pasada": false,
+    "eliminar_reserva_futura": false,
+    "eliminar_reserva_pasada": false,
+    "vaciar_papelera": false,
+    "aplicar_descuento": false,
+    "modificar_monto_cobrado": false,
+    "modificar_precio_base": false,
+    "checkin": true,
+    "checkout": true,
+    "registrar_ine": true,
+    "ver_dashboard": true,
+    "ver_finanzas": false,
+    "ver_kpis_avanzados": false,
+    "exportar_sii": false,
+    "exportar_backup": false,
+    "importar_backup": false,
+    "ver_audit_log": false,
+    "gestionar_usuarios": false,
+    "configurar_supabase": false,
+    "override_overbooking": false,
+    "operar_hk": false,
+    "ver_cotizaciones": true,
+    "importar_csv": false
+  },
+  contabilidad: {
+    "crear_reserva": false,
+    "modificar_reserva_futura": false,
+    "modificar_reserva_pasada": false,
+    "eliminar_reserva_futura": false,
+    "eliminar_reserva_pasada": false,
+    "ver_dashboard": true,
+    "ver_finanzas": true,
+    "ver_kpis_avanzados": true,
+    "exportar_sii": true,
+    "exportar_backup": false,
+    "importar_backup": false,
+    "ver_audit_log": false,
+    "gestionar_usuarios": false,
+    "operar_hk": false
+  },
+  hk: {
+    "operar_hk": true,
+    "ver_dashboard": false
+  }
+};
+
+// ── ESTADO GLOBAL DE SESIÓN ───────────────────────────────────
+var currentUser = null;          // {id, nombre, username, rol, ...}
+var _sessionStartedAt = null;
+var _sessionPinCache = {};       // Cache temporal de PIN reciente (5 min) para no pedirlo a cada acción
+
+// ── PERSISTENCIA DE USUARIOS ──────────────────────────────────
+function getUsers(){
+  try{ return JSON.parse(localStorage.getItem("hv_users")||"[]"); }
+  catch(e){ return []; }
+}
+function saveUsers(arr){
+  safeSave("hv_users", arr);
+  if(typeof sbSet==="function") sbSet("hv_users", arr);
+}
+
+// ── PERSISTENCIA DE AUDIT LOG ─────────────────────────────────
+function getAuditLog(){
+  try{ return JSON.parse(localStorage.getItem("hv_audit")||"[]"); }
+  catch(e){ return []; }
+}
+function _saveAuditLog(arr){
+  // Mantener máximo 5000 entradas en local; el resto solo en Supabase
+  if(arr.length > 5000){
+    arr = arr.slice(-5000);
+  }
+  safeSave("hv_audit", arr);
+  if(typeof sbSet==="function") sbSet("hv_audit", arr);
+}
+
+// ── MIGRACIÓN: crear usuario "dueno" la primera vez ───────────
+async function _migrarUsuarioDueno(){
+  var users = getUsers();
+  if(users.length > 0) return; // Ya migrado
+  // Crear usuario "dueño" con el password actual de admin
+  var adminHash = getClaveHash();
+  // PIN inicial = "0000" (el dueño debe cambiarlo en su primer ingreso)
+  var pinInicial = await sha256("0000");
+  users.push({
+    id: "u_dueno_default",
+    nombre: "Dueño",
+    username: "dueno",
+    rol: "dueno",
+    passwordHash: adminHash,
+    pinHash: pinInicial,
+    pinDefault: true, // marca que el PIN es el default y debe cambiarse
+    activo: true,
+    createdAt: new Date().toISOString(),
+    createdBy: "system_migration"
+  });
+  saveUsers(users);
+  console.log("✓ Usuario dueño migrado desde admin password legacy");
+}
+
+// ── AUTH: LOGIN ───────────────────────────────────────────────
+async function authLogin(username, password){
+  var users = getUsers();
+  // Caso especial: si no hay usuarios, primero migrar
+  if(users.length === 0){
+    await _migrarUsuarioDueno();
+    users = getUsers();
+  }
+  var user = users.find(function(u){ return u.username===username && u.activo; });
+  if(!user){
+    // Backward compat: si meten el password legacy directo, asumir dueño
+    var hLegacy = await sha256(username); // username es realmente el password en modo legacy
+    if(hLegacy === getClaveHash()){
+      // Login legacy: tomar el primer usuario dueño activo
+      user = users.find(function(u){ return u.rol==="dueno" && u.activo; });
+      if(user){
+        currentUser = user;
+        _sessionStartedAt = new Date().toISOString();
+        _sessionPinCache = {};
+        await _logAudit("LOGIN", { type:"sesion" }, null, { rol:user.rol, modo:"legacy" }, "Login legacy");
+        return { ok:true, user:user, legacy:true };
+      }
+    }
+    return { ok:false, error:"Usuario no encontrado" };
+  }
+  var hPwd = await sha256(password);
+  if(hPwd !== user.passwordHash){
+    await _logAudit("LOGIN_FAIL", { type:"sesion", id:user.id }, null, { username:username }, "Password incorrecto", "high");
+    return { ok:false, error:"Password incorrecto" };
+  }
+  currentUser = user;
+  _sessionStartedAt = new Date().toISOString();
+  _sessionPinCache = {};
+  await _logAudit("LOGIN", { type:"sesion" }, null, { rol:user.rol }, "Login exitoso");
+  return { ok:true, user:user };
+}
+
+// ── AUTH: LOGOUT ──────────────────────────────────────────────
+async function authLogout(){
+  if(currentUser){
+    await _logAudit("LOGOUT", { type:"sesion" }, null, { rol:currentUser.rol }, "Logout");
+  }
+  currentUser = null;
+  _sessionStartedAt = null;
+  _sessionPinCache = {};
+}
+
+// ── AUTH: VERIFICAR PERMISO ───────────────────────────────────
+function canDo(accion){
+  if(!currentUser) return false;
+  var rol = currentUser.rol;
+  var perms = PERMISOS[rol] || {};
+  if(perms["*"] === true) return true;
+  if(perms[accion] === true) return true;
+  if(perms[accion] === "pin") return true; // Permitido pero requiere PIN
+  return false;
+}
+function requierePIN(accion){
+  if(!currentUser) return false;
+  var rol = currentUser.rol;
+  var perms = PERMISOS[rol] || {};
+  if(perms[accion] === "pin") return true;
+  // Para dueño, ciertas acciones críticas también requieren PIN
+  if(perms["*"] === true){
+    var pinList = perms["_pin_required"] || [];
+    return pinList.indexOf(accion) >= 0;
+  }
+  return false;
+}
+
+// ── AUTH: VERIFICAR PIN ───────────────────────────────────────
+async function verifyPIN(pinIngresado){
+  if(!currentUser) return false;
+  var users = getUsers();
+  var user = users.find(function(u){ return u.id===currentUser.id; });
+  if(!user) return false;
+  var h = await sha256(String(pinIngresado));
+  return h === user.pinHash;
+}
+
+// ── AUTH: CAMBIAR PIN PROPIO ──────────────────────────────────
+async function cambiarMiPIN(pinActual, pinNuevo){
+  if(!currentUser) return { ok:false, error:"Sin sesión" };
+  var users = getUsers();
+  var user = users.find(function(u){ return u.id===currentUser.id; });
+  if(!user) return { ok:false, error:"Usuario no encontrado" };
+  var hAct = await sha256(String(pinActual));
+  if(hAct !== user.pinHash) return { ok:false, error:"PIN actual incorrecto" };
+  if(!/^\d{4,6}$/.test(String(pinNuevo))) return { ok:false, error:"PIN debe ser 4-6 dígitos" };
+  user.pinHash = await sha256(String(pinNuevo));
+  user.pinDefault = false;
+  user.pinChangedAt = new Date().toISOString();
+  saveUsers(users);
+  currentUser = user;
+  await _logAudit("CHANGE_PIN", { type:"usuario", id:user.id }, null, null, "Cambio de PIN propio");
+  return { ok:true };
+}
+
+// ── AUDIT LOG: REGISTRAR ACCIÓN ───────────────────────────────
+async function _logAudit(action, target, before, after, motivo, severity){
+  try{
+    var log = getAuditLog();
+    var entry = {
+      id: "a_" + Date.now() + "_" + Math.random().toString(36).slice(2,8),
+      timestamp: new Date().toISOString(),
+      userId: currentUser ? currentUser.id : "anonymous",
+      userName: currentUser ? currentUser.nombre : "Anónimo",
+      userRol: currentUser ? currentUser.rol : "none",
+      action: action,
+      target: target || null,
+      before: before || null,
+      after: after || null,
+      motivo: motivo || "",
+      severity: severity || "medium"
+    };
+    log.push(entry);
+    _saveAuditLog(log);
+  }catch(e){
+    console.error("Audit log error:", e);
+  }
+}
+
+// ── AUDIT LOG: API PÚBLICA PARA QUE LO USEN OTRAS FUNCIONES ──
+function logAccion(action, target, before, after, motivo, severity){
+  return _logAudit(action, target, before, after, motivo, severity);
+}
+
+// ── PEDIR PIN AL USUARIO (modal) ──────────────────────────────
+// Devuelve Promise<boolean>: true si PIN correcto, false si cancelado o incorrecto
+function pedirPIN(accionDescripcion, motivoRequerido){
+  return new Promise(function(resolve){
+    if(!currentUser){ resolve(false); return; }
+    // Cache: si ya verificó PIN para esta acción en los últimos 5 min, no pedirlo de nuevo
+    var cacheKey = currentUser.id + "_" + accionDescripcion;
+    var cached = _sessionPinCache[cacheKey];
+    if(cached && (Date.now() - cached) < 5*60*1000){
+      resolve(true); return;
+    }
+    var modal = document.createElement("div");
+    modal.id = "pinModal_"+Date.now();
+    modal.style.cssText = "position:fixed;inset:0;z-index:999999;background:rgba(0,0,0,0.65);display:flex;align-items:center;justify-content:center;padding:16px;animation:fadeIn .15s ease;";
+    var rolColor = (ROLES_INFO[currentUser.rol]||{}).color || "#7c3aed";
+    modal.innerHTML =
+      '<div style="background:#fff;border-radius:16px;padding:24px;width:100%;max-width:380px;box-shadow:0 20px 60px rgba(0,0,0,0.5);">'+
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">'+
+        '<div style="width:42px;height:42px;border-radius:10px;background:'+rolColor+';color:#fff;display:flex;align-items:center;justify-content:center;font-size:20px;">🔐</div>'+
+        '<div><div style="font-size:14px;font-weight:800;color:#1a1a2e;">Acción protegida</div>'+
+        '<div style="font-size:11px;color:#666;">'+esc(accionDescripcion)+'</div></div>'+
+      '</div>'+
+      '<div style="background:#fef3c7;border:1px solid #fbbf24;border-radius:8px;padding:8px 12px;margin-bottom:14px;font-size:11px;color:#92400e;">⚠ Esta acción quedará registrada en el log de auditoría con tu nombre.</div>'+
+      '<label style="font-size:11px;font-weight:700;color:#555;display:block;margin-bottom:4px;">Tu PIN personal</label>'+
+      '<input id="pinModalInput" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off" style="width:100%;padding:12px;font-size:18px;text-align:center;letter-spacing:0.5em;border:2px solid #ddd;border-radius:10px;font-family:inherit;margin-bottom:10px;" />'+
+      (motivoRequerido?'<label style="font-size:11px;font-weight:700;color:#555;display:block;margin-bottom:4px;">Motivo (obligatorio)</label><input id="pinModalMotivo" type="text" placeholder="Ej: Cliente canceló" style="width:100%;padding:10px;font-size:13px;border:2px solid #ddd;border-radius:10px;font-family:inherit;margin-bottom:10px;" />':'<label style="font-size:11px;font-weight:700;color:#555;display:block;margin-bottom:4px;">Motivo (opcional)</label><input id="pinModalMotivo" type="text" placeholder="Ej: Cliente canceló" style="width:100%;padding:10px;font-size:13px;border:2px solid #ddd;border-radius:10px;font-family:inherit;margin-bottom:10px;" />')+
+      '<div id="pinModalErr" style="display:none;font-size:11px;color:#dc2626;margin-bottom:8px;text-align:center;font-weight:600;"></div>'+
+      '<div style="display:flex;gap:8px;">'+
+        '<button id="pinModalCancel" style="flex:1;padding:11px;border:1.5px solid #ddd;border-radius:10px;background:#fff;cursor:pointer;font-size:13px;font-family:inherit;color:#555;font-weight:600;">Cancelar</button>'+
+        '<button id="pinModalOk" style="flex:1;padding:11px;border:none;border-radius:10px;background:'+rolColor+';color:#fff;cursor:pointer;font-size:13px;font-family:inherit;font-weight:700;">Confirmar</button>'+
+      '</div>'+
+      '</div>';
+    document.body.appendChild(modal);
+    var input = document.getElementById("pinModalInput");
+    var motivoInp = document.getElementById("pinModalMotivo");
+    var errEl = document.getElementById("pinModalErr");
+    setTimeout(function(){ input.focus(); }, 50);
+    var cleanup = function(){ modal.remove(); document.removeEventListener("keydown", escH); };
+    var escH = function(e){ if(e.key==="Escape"){ cleanup(); resolve(false); } };
+    document.addEventListener("keydown", escH);
+    var doSubmit = async function(){
+      var pin = input.value.trim();
+      var motivo = motivoInp.value.trim();
+      if(motivoRequerido && !motivo){ errEl.textContent="Debes indicar un motivo"; errEl.style.display="block"; motivoInp.focus(); return; }
+      if(!pin){ errEl.textContent="Ingresa tu PIN"; errEl.style.display="block"; return; }
+      var ok = await verifyPIN(pin);
+      if(!ok){
+        errEl.textContent="PIN incorrecto";
+        errEl.style.display="block";
+        input.value=""; input.focus();
+        await _logAudit("PIN_FAIL", { type:"sesion" }, null, { accion:accionDescripcion }, "PIN incorrecto", "high");
+        return;
+      }
+      _sessionPinCache[cacheKey] = Date.now();
+      // Guardar motivo para que la acción que llamó pueda accederlo
+      window._lastPinMotivo = motivo;
+      cleanup();
+      resolve(true);
+    };
+    document.getElementById("pinModalOk").onclick = doSubmit;
+    document.getElementById("pinModalCancel").onclick = function(){ cleanup(); resolve(false); };
+    input.addEventListener("keydown", function(e){ if(e.key==="Enter") doSubmit(); });
+    modal.addEventListener("click", function(e){ if(e.target===modal){ cleanup(); resolve(false); } });
+  });
+}
+
+// ── HELPER: ejecutar acción protegida ─────────────────────────
+// Uso: await runProtected("eliminar_reserva", "Eliminar reserva de Juan", async () => { ... }, true);
+async function runProtected(accion, descripcion, callback, motivoObligatorio){
+  if(!currentUser){ toast("Sin sesión activa","err"); return false; }
+  if(!canDo(accion)){
+    toast("⛔ No tienes permiso para esta acción ("+(ROLES_INFO[currentUser.rol]||{}).label+")","err",4000);
+    await _logAudit("PERMISSION_DENIED", { type:"accion" }, null, { accion:accion, rol:currentUser.rol }, "Intento bloqueado", "high");
+    return false;
+  }
+  if(requierePIN(accion)){
+    var pinOk = await pedirPIN(descripcion, !!motivoObligatorio);
+    if(!pinOk) return false;
+  }
+  try{
+    await callback();
+    return true;
+  }catch(e){
+    console.error("runProtected error:", e);
+    toast("Error: "+e.message,"err");
+    return false;
+  }
+}
+
+// ── GESTIÓN DE USUARIOS (CRUD) ────────────────────────────────
+async function crearUsuario(datos){
+  if(!canDo("gestionar_usuarios")){ return { ok:false, error:"Sin permisos" }; }
+  var users = getUsers();
+  if(users.find(function(u){ return u.username===datos.username; })){
+    return { ok:false, error:"Username ya existe" };
+  }
+  if(!ROLES_INFO[datos.rol]) return { ok:false, error:"Rol inválido" };
+  if(!datos.nombre || !datos.username || !datos.password || !datos.pin){
+    return { ok:false, error:"Datos incompletos" };
+  }
+  if(!/^\d{4,6}$/.test(String(datos.pin))) return { ok:false, error:"PIN debe ser 4-6 dígitos" };
+  var newUser = {
+    id: "u_" + Date.now() + "_" + Math.random().toString(36).slice(2,6),
+    nombre: datos.nombre,
+    username: datos.username,
+    rol: datos.rol,
+    passwordHash: await sha256(datos.password),
+    pinHash: await sha256(String(datos.pin)),
+    pinDefault: false,
+    activo: true,
+    createdAt: new Date().toISOString(),
+    createdBy: currentUser ? currentUser.id : "system"
+  };
+  users.push(newUser);
+  saveUsers(users);
+  await _logAudit("CREATE_USER", { type:"usuario", id:newUser.id }, null, { nombre:newUser.nombre, rol:newUser.rol }, "Usuario creado", "high");
+  return { ok:true, user:newUser };
+}
+async function desactivarUsuario(userId){
+  if(!canDo("gestionar_usuarios")) return { ok:false, error:"Sin permisos" };
+  var users = getUsers();
+  var u = users.find(function(x){ return x.id===userId; });
+  if(!u) return { ok:false, error:"No encontrado" };
+  if(u.id === currentUser.id) return { ok:false, error:"No puedes desactivarte a ti mismo" };
+  if(u.rol === "dueno"){
+    var otrosDueno = users.filter(function(x){ return x.rol==="dueno" && x.activo && x.id!==userId; });
+    if(otrosDueno.length === 0) return { ok:false, error:"Debe quedar al menos un dueño activo" };
+  }
+  var before = JSON.parse(JSON.stringify(u));
+  u.activo = false;
+  u.deactivatedAt = new Date().toISOString();
+  saveUsers(users);
+  await _logAudit("DEACTIVATE_USER", { type:"usuario", id:userId }, before, u, "Usuario desactivado", "high");
+  return { ok:true };
+}
+async function reactivarUsuario(userId){
+  if(!canDo("gestionar_usuarios")) return { ok:false, error:"Sin permisos" };
+  var users = getUsers();
+  var u = users.find(function(x){ return x.id===userId; });
+  if(!u) return { ok:false, error:"No encontrado" };
+  u.activo = true;
+  delete u.deactivatedAt;
+  saveUsers(users);
+  await _logAudit("REACTIVATE_USER", { type:"usuario", id:userId }, null, null, "Usuario reactivado", "medium");
+  return { ok:true };
+}
+async function resetearPasswordUsuario(userId, newPwd){
+  if(!canDo("gestionar_usuarios")) return { ok:false, error:"Sin permisos" };
+  var users = getUsers();
+  var u = users.find(function(x){ return x.id===userId; });
+  if(!u) return { ok:false, error:"No encontrado" };
+  u.passwordHash = await sha256(newPwd);
+  u.passwordResetAt = new Date().toISOString();
+  saveUsers(users);
+  await _logAudit("RESET_PASSWORD", { type:"usuario", id:userId }, null, null, "Password reseteado por admin", "high");
+  return { ok:true };
+}
+async function resetearPINUsuario(userId, newPin){
+  if(!canDo("gestionar_usuarios")) return { ok:false, error:"Sin permisos" };
+  if(!/^\d{4,6}$/.test(String(newPin))) return { ok:false, error:"PIN debe ser 4-6 dígitos" };
+  var users = getUsers();
+  var u = users.find(function(x){ return x.id===userId; });
+  if(!u) return { ok:false, error:"No encontrado" };
+  u.pinHash = await sha256(String(newPin));
+  u.pinDefault = true;
+  saveUsers(users);
+  await _logAudit("RESET_PIN", { type:"usuario", id:userId }, null, null, "PIN reseteado por admin", "high");
+  return { ok:true };
+}
+
+// ── HELPERS UI ────────────────────────────────────────────────
+function rolBadgeHtml(rol){
+  var info = ROLES_INFO[rol] || { label:rol, ico:"?", color:"#888" };
+  return '<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:6px;background:'+info.color+'15;color:'+info.color+';font-size:10px;font-weight:700;">'+info.ico+' '+info.label+'</span>';
+}
+
+// ── MODAL: GESTIÓN DE USUARIOS ────────────────────────────────
+function showUsuariosModal(){
+  if(!currentUser){ toast("Inicia sesión primero","err"); return; }
+  if(!canDo("gestionar_usuarios")){ toast("⛔ Solo el dueño puede gestionar usuarios","err"); return; }
+  if(requierePIN("gestionar_usuarios")){
+    pedirPIN("Gestión de usuarios", false).then(function(ok){ if(ok) _renderUsuariosModal(); });
+    return;
+  }
+  _renderUsuariosModal();
+}
+function _renderUsuariosModal(){
+  var users = getUsers();
+  var existing = document.getElementById("usuariosModal");
+  if(existing) existing.remove();
+  var modal = document.createElement("div");
+  modal.id = "usuariosModal";
+  modal.className = "modal-overlay";
+  modal.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;";
+  var rows = users.map(function(u){
+    var badge = rolBadgeHtml(u.rol);
+    var estado = u.activo ? '<span style="color:#2dd468;font-size:11px;font-weight:700;">● Activo</span>' : '<span style="color:#888;font-size:11px;">○ Inactivo</span>';
+    var pinDef = u.pinDefault ? ' <span style="color:#f59e0b;font-size:9px;font-weight:700;" title="PIN por defecto, debe cambiarlo">⚠ PIN 0000</span>' : '';
+    var actions = '';
+    if(u.id !== currentUser.id){
+      if(u.activo){
+        actions += '<button onclick="_uiDesactivar(\''+u.id+'\')" style="background:#fee;color:#c00;border:1px solid #fcc;border-radius:4px;padding:4px 8px;font-size:10px;cursor:pointer;margin:2px;">Desactivar</button>';
+      } else {
+        actions += '<button onclick="_uiReactivar(\''+u.id+'\')" style="background:#efe;color:#080;border:1px solid #cfc;border-radius:4px;padding:4px 8px;font-size:10px;cursor:pointer;margin:2px;">Reactivar</button>';
+      }
+      actions += '<button onclick="_uiResetPwd(\''+u.id+'\')" style="background:#eef;color:#06c;border:1px solid #ccf;border-radius:4px;padding:4px 8px;font-size:10px;cursor:pointer;margin:2px;">Reset clave</button>';
+      actions += '<button onclick="_uiResetPin(\''+u.id+'\')" style="background:#eef;color:#06c;border:1px solid #ccf;border-radius:4px;padding:4px 8px;font-size:10px;cursor:pointer;margin:2px;">Reset PIN</button>';
+    } else {
+      actions = '<span style="color:#888;font-size:10px;">(tú)</span>';
+    }
+    return '<tr><td style="padding:8px;border-bottom:1px solid #eee;"><b>'+esc(u.nombre)+'</b><br><span style="color:#888;font-size:10px;">@'+esc(u.username)+'</span></td><td style="padding:8px;border-bottom:1px solid #eee;">'+badge+pinDef+'</td><td style="padding:8px;border-bottom:1px solid #eee;">'+estado+'</td><td style="padding:8px;border-bottom:1px solid #eee;text-align:right;">'+actions+'</td></tr>';
+  }).join("");
+  modal.innerHTML = '<div style="background:var(--c,#fff);color:var(--t,#222);max-width:900px;width:100%;max-height:90vh;overflow:auto;border-radius:12px;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.5);">'
+    + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;border-bottom:2px solid #D4A96A;padding-bottom:12px;">'
+    + '<h2 style="margin:0;font-size:20px;">👥 Gestión de Usuarios</h2>'
+    + '<button onclick="document.getElementById(\'usuariosModal\').remove()" style="background:none;border:none;font-size:24px;cursor:pointer;color:#888;">×</button>'
+    + '</div>'
+    + '<button onclick="_uiCrearUsuario()" style="background:#D4A96A;color:#3A2E1E;border:none;padding:10px 16px;border-radius:8px;font-weight:700;cursor:pointer;margin-bottom:16px;">+ Nuevo usuario</button>'
+    + '<table style="width:100%;border-collapse:collapse;font-size:13px;"><thead><tr style="background:#FAF6F0;color:#3A2E1E;"><th style="padding:10px;text-align:left;">Usuario</th><th style="padding:10px;text-align:left;">Rol</th><th style="padding:10px;text-align:left;">Estado</th><th style="padding:10px;text-align:right;">Acciones</th></tr></thead><tbody>'+rows+'</tbody></table>'
+    + '<div style="margin-top:16px;padding:12px;background:#FFF8E7;border-left:3px solid #D4A96A;font-size:11px;color:#7A5A2E;border-radius:4px;">💡 Cada usuario tiene su propio password y PIN. El PIN se solicita para acciones críticas (eliminar reservas, modificar montos, vaciar papelera).</div>'
+    + '</div>';
+  modal.addEventListener("click", function(e){ if(e.target===modal) modal.remove(); });
+  document.body.appendChild(modal);
+}
+function _uiCrearUsuario(){
+  showInput("Nombre completo:", "", function(nombre){
+    if(!nombre) return;
+    showInput("Username (sin espacios):", "", function(username){
+      if(!username) return;
+      var rolesDisp = "dueno, gerente, recepcion, contabilidad, hk";
+      showInput("Rol ("+rolesDisp+"):", "recepcion", function(rol){
+        if(!rol) return;
+        showInput("Password (mín 4 caracteres):", "", function(password){
+          if(!password) return;
+          showInput("PIN (4-6 dígitos):", "", function(pin){
+            if(!pin) return;
+            crearUsuario({ nombre:nombre, username:username.toLowerCase().trim(), rol:rol.toLowerCase().trim(), password:password, pin:pin }).then(function(res){
+              if(res.ok){ toast("Usuario creado: "+res.user.username,"ok"); _renderUsuariosModal(); }
+              else { toast("Error: "+res.error,"err"); }
+            });
+          }, "password");
+        }, "password");
+      });
+    });
+  });
+}
+function _uiDesactivar(uid){
+  showConfirm("Desactivar usuario","¿Bloquear el acceso de este usuario? Sus acciones pasadas quedan en el audit log.", function(){
+    desactivarUsuario(uid).then(function(res){
+      if(res.ok){ toast("Usuario desactivado","ok"); _renderUsuariosModal(); }
+      else { toast("Error: "+res.error,"err"); }
+    });
+  }, "Desactivar", true);
+}
+function _uiReactivar(uid){
+  reactivarUsuario(uid).then(function(res){
+    if(res.ok){ toast("Usuario reactivado","ok"); _renderUsuariosModal(); }
+    else { toast("Error: "+res.error,"err"); }
+  });
+}
+function _uiResetPwd(uid){
+  showInput("Nueva contraseña (mín 4 caracteres):", "", function(pwd){
+    if(!pwd || pwd.length < 4){ toast("Contraseña muy corta","err"); return; }
+    resetearPasswordUsuario(uid, pwd).then(function(res){
+      if(res.ok){ toast("Contraseña reseteada","ok"); }
+      else { toast("Error: "+res.error,"err"); }
+    });
+  }, "password");
+}
+function _uiResetPin(uid){
+  showInput("Nuevo PIN (4-6 dígitos):", "", function(pin){
+    if(!/^\d{4,6}$/.test(String(pin||""))){ toast("PIN inválido","err"); return; }
+    resetearPINUsuario(uid, pin).then(function(res){
+      if(res.ok){ toast("PIN reseteado","ok"); _renderUsuariosModal(); }
+      else { toast("Error: "+res.error,"err"); }
+    });
+  }, "password");
+}
+
+// ── MODAL: AUDIT LOG VIEWER ───────────────────────────────────
+function showAuditModal(){
+  if(!currentUser){ toast("Inicia sesión primero","err"); return; }
+  if(!canDo("ver_audit_log") && !(PERMISOS[currentUser.rol]||{})["*"]){
+    toast("⛔ Solo el dueño puede ver el registro de auditoría","err"); return;
+  }
+  _renderAuditModal();
+}
+function _renderAuditModal(filterText){
+  var log = getAuditLog();
+  var users = getUsers();
+  var byId = {};
+  users.forEach(function(u){ byId[u.id] = u; });
+  if(filterText){
+    var f = filterText.toLowerCase();
+    log = log.filter(function(e){ return JSON.stringify(e).toLowerCase().indexOf(f)>=0; });
+  }
+  var existing = document.getElementById("auditModal");
+  if(existing) existing.remove();
+  var modal = document.createElement("div");
+  modal.id = "auditModal";
+  modal.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;";
+  var rows = log.slice(0, 500).map(function(e){
+    var u = byId[e.userId] || { nombre:"?", rol:"?" };
+    var ts = new Date(e.timestamp).toLocaleString("es-CL");
+    var sevColor = e.severity==="high" ? "#dc2626" : (e.severity==="medium" ? "#d97706" : "#888");
+    var motivo = e.motivo ? '<br><span style="color:#888;font-size:10px;">📝 '+esc(e.motivo)+'</span>' : '';
+    return '<tr style="border-bottom:1px solid #eee;">'
+      + '<td style="padding:6px 8px;font-size:10px;color:#888;white-space:nowrap;">'+ts+'</td>'
+      + '<td style="padding:6px 8px;font-size:11px;"><b>'+esc(u.nombre)+'</b><br><span style="color:#888;font-size:9px;">'+esc(u.rol)+'</span></td>'
+      + '<td style="padding:6px 8px;font-size:11px;"><span style="color:'+sevColor+';font-weight:700;">'+esc(e.action)+'</span>'+motivo+'</td>'
+      + '<td style="padding:6px 8px;font-size:10px;color:#666;">'+esc(JSON.stringify(e.target||{}))+'</td>'
+      + '</tr>';
+  }).join("") || '<tr><td colspan="4" style="padding:20px;text-align:center;color:#888;">Sin registros</td></tr>';
+  modal.innerHTML = '<div style="background:var(--c,#fff);color:var(--t,#222);max-width:1100px;width:100%;max-height:90vh;overflow:auto;border-radius:12px;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.5);">'
+    + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;border-bottom:2px solid #D4A96A;padding-bottom:12px;">'
+    + '<h2 style="margin:0;font-size:20px;">📋 Registro de Auditoría <span style="font-size:12px;color:#888;font-weight:400;">('+log.length+' eventos)</span></h2>'
+    + '<button onclick="document.getElementById(\'auditModal\').remove()" style="background:none;border:none;font-size:24px;cursor:pointer;color:#888;">×</button>'
+    + '</div>'
+    + '<input id="auditFilter" placeholder="Filtrar por usuario, acción, motivo..." value="'+esc(filterText||"")+'" oninput="_renderAuditModal(this.value)" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:6px;margin-bottom:12px;font-size:13px;">'
+    + '<table style="width:100%;border-collapse:collapse;font-size:12px;"><thead><tr style="background:#FAF6F0;color:#3A2E1E;"><th style="padding:8px;text-align:left;">Fecha</th><th style="padding:8px;text-align:left;">Usuario</th><th style="padding:8px;text-align:left;">Acción</th><th style="padding:8px;text-align:left;">Objetivo</th></tr></thead><tbody>'+rows+'</tbody></table>'
+    + '<div style="margin-top:16px;padding:12px;background:#FFF8E7;border-left:3px solid #D4A96A;font-size:11px;color:#7A5A2E;border-radius:4px;">⚠ Este registro es inmutable. Las acciones críticas (eliminaciones, modificaciones financieras, login fallidos) quedan trazadas con su autor, fecha y motivo. Mostrando últimos 500 eventos.</div>'
+    + '</div>';
+  modal.addEventListener("click", function(e){ if(e.target===modal) modal.remove(); });
+  document.body.appendChild(modal);
+  setTimeout(function(){ var f = document.getElementById("auditFilter"); if(f) f.focus(); }, 50);
+}
+
+// ══════════════════════════════════════════════════════════════
+// FIN SISTEMA DE USUARIOS, ROLES Y AUDIT LOG
+// ══════════════════════════════════════════════════════════════
 
 // ══════════════════════════════════════════════════════════════
 // RESERVAS DEL CUADERNO (leídas de las fotos)
@@ -2761,6 +3393,12 @@ window.addEventListener('unhandledrejection',function(e){console.error('Promise:
           <span class="sync-dot off" id="syncDot"></span>
           <span class="sync-lbl" id="syncLbl">Sin sync</span>
         </div>
+        <button class="tb-btn" onclick="showUsuariosModal()" title="Gestión de usuarios" aria-label="Usuarios" id="btnUsuariosTB">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        </button>
+        <button class="tb-btn" onclick="showAuditModal()" title="Registro de actividad" aria-label="Auditoría" id="btnAuditTB">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg>
+        </button>
         <button class="tb-btn" onclick="cambiarClave()" title="Cambiar clave admin" aria-label="Cambiar clave">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/><circle cx="12" cy="16" r="1"/></svg>
         </button>
@@ -3058,16 +3696,25 @@ let esAdmin = false;
 async function doLogin(){
   const val = document.getElementById("claveInput").value;
   if(!val) return;
-  const h = await sha256(val);
-  if(h === getClaveHash()){
-    esAdmin = true;
+  // Asegurar migración del usuario dueño desde el hash legacy
+  try{ if(getUsers().length === 0) await _migrarUsuarioDueno(); }catch(e){ console.warn("migración:",e); }
+  // Detectar formato "usuario:password" o asumir dueño por defecto
+  var username = "dueno", password = val;
+  if(val.indexOf(":") > 0){
+    var parts = val.split(":");
+    username = parts[0].trim().toLowerCase();
+    password = parts.slice(1).join(":");
+  }
+  var res = await authLogin(username, password);
+  if(res.ok){
+    esAdmin = (res.user.rol === "dueno" || res.user.rol === "gerente" || res.user.rol === "recepcion" || res.user.rol === "contabilidad");
     document.getElementById("loginErr").style.display = "none";
     document.title = "🏠 Dashboard — Hotel Las Vicuñas";
+    doLogin._fails = 0;
     iniciarApp(true);
   } else {
     document.getElementById("loginErr").style.display = "block";
     document.getElementById("claveInput").value = "";
-    // Rate limit: disable login for escalating seconds
     if(!doLogin._fails) doLogin._fails=0;
     doLogin._fails++;
     if(doLogin._fails >= 3){
@@ -3139,6 +3786,7 @@ function iniciarApp(admin){
 }
 
 function doLogout(){
+  try{ authLogout(); }catch(e){}
   esAdmin = false;
   document.getElementById("loginScreen").style.display = "flex";
   var appEl=document.getElementById("app");
@@ -5223,37 +5871,45 @@ function verBK(id){
 
 function delBKReserva(id, modalEl){
   showConfirm("Eliminar reserva Booking","¿Eliminar esta reserva de Booking?", function(){
-    const papelera=getPapelera();
-    const bkRes=getBookingReservas();
-    const r=bkRes.find(x=>x.id===id);
-    if(r){ r.deletedAt=new Date().toISOString(); r._origenBooking=true; papelera.unshift(r); savePapelera(papelera); }
-    const updated=bkRes.filter(x=>x.id!==id);
-    fbSaveBooking(updated);
-    rDisp();
-    try{ rFin(); }catch(e){}
-    try{ if(modalEl) modalEl.remove(); }catch(e){}
-    updatePapeleraBadges();
-    toast("Reserva de Booking eliminada","ok");
+    runProtected("eliminar_reserva_futura", "Eliminar reserva Booking #"+id, async function(){
+      const papelera=getPapelera();
+      const bkRes=getBookingReservas();
+      const r=bkRes.find(x=>x.id===id);
+      const before = r ? JSON.parse(JSON.stringify(r)) : null;
+      if(r){ r.deletedAt=new Date().toISOString(); r._origenBooking=true; papelera.unshift(r); savePapelera(papelera); }
+      const updated=bkRes.filter(x=>x.id!==id);
+      fbSaveBooking(updated);
+      await _logAudit("DELETE_RESERVA_BOOKING", { type:"reserva_booking", id:id }, before, null, window._lastPinMotivo||"", "high");
+      rDisp();
+      try{ rFin(); }catch(e){}
+      try{ if(modalEl) modalEl.remove(); }catch(e){}
+      updatePapeleraBadges();
+      toast("Reserva de Booking eliminada","ok");
+    }, true);
   },"Eliminar",true);
 }
 
 function delReserva(id, modalEl){
   showConfirm("Eliminar reserva","¿Mover esta reserva a la papelera?", function(){
-    const reservas = getReservas();
-    const r = reservas.find(x=>x.id===id);
-    if(r){
-      const papelera = getPapelera();
-      r.deletedAt = new Date().toISOString();
-      papelera.unshift(r);
-      savePapelera(papelera);
-    }
-    const updated = reservas.filter(x=>x.id!==id);
-    safeSave("hv_reservas", updated);
-    sbSet("hv_reservas", updated);
-    rDisp();
-    try{ rTabla(); }catch(e){}
-    try{ rFin(); }catch(e){}
-    try{ if(modalEl) modalEl.remove(); }catch(e){}
+    runProtected("eliminar_reserva_futura", "Eliminar reserva #"+id, async function(){
+      const reservas = getReservas();
+      const r = reservas.find(x=>x.id===id);
+      const before = r ? JSON.parse(JSON.stringify(r)) : null;
+      if(r){
+        const papelera = getPapelera();
+        r.deletedAt = new Date().toISOString();
+        papelera.unshift(r);
+        savePapelera(papelera);
+      }
+      const updated = reservas.filter(x=>x.id!==id);
+      safeSave("hv_reservas", updated);
+      sbSet("hv_reservas", updated);
+      await _logAudit("DELETE_RESERVA", { type:"reserva", id:id }, before, null, window._lastPinMotivo||"", "high");
+      rDisp();
+      try{ rTabla(); }catch(e){}
+      try{ rFin(); }catch(e){}
+      try{ if(modalEl) modalEl.remove(); }catch(e){}
+    }, true);
   }, "Eliminar", true);
 }
 
@@ -6546,10 +7202,14 @@ function restaurarReserva(idx){
 
 function eliminarDefinitivo(idx){
   showConfirm("Eliminar definitivamente","¿Eliminar esta reserva para siempre? No se puede deshacer.", function(){
-    const items = getPapelera();
-    items.splice(idx,1);
-    savePapelera(items);
-    renderPapeleraBody();
+    runProtected("eliminar_permanente", "Eliminar definitivamente reserva de papelera", async function(){
+      const items = getPapelera();
+      const before = items[idx] ? JSON.parse(JSON.stringify(items[idx])) : null;
+      items.splice(idx,1);
+      savePapelera(items);
+      await _logAudit("DELETE_PERMANENT", { type:"papelera", idx:idx }, before, null, window._lastPinMotivo||"", "high");
+      renderPapeleraBody();
+    }, true);
   }, "Eliminar", true);
 }
 
@@ -6557,8 +7217,12 @@ function vaciarPapelera(){
   const n = getPapelera().length;
   if(!n){ toast("La papelera ya está vacía.","info"); return; }
   showConfirm("Vaciar papelera","¿Eliminar definitivamente las "+n+" reservas eliminadas?", function(){
-    savePapelera([]);
-    renderPapeleraBody();
+    runProtected("vaciar_papelera", "Vaciar papelera ("+n+" reservas)", async function(){
+      const before = getPapelera();
+      savePapelera([]);
+      await _logAudit("EMPTY_TRASH", { type:"papelera" }, { count:before.length, items:before }, null, window._lastPinMotivo||"", "high");
+      renderPapeleraBody();
+    }, true);
   }, "Vaciar todo", true);
 }
 // ── showPapelera y renderPapeleraBody unificadas arriba ───────
