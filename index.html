@@ -57,9 +57,14 @@ function showConfirm(title, msg, onOk, okLabel, danger){
   okBtn.className = "confirm-ok" + (danger ? "" : " safe");
   var modal = document.getElementById("confirmModal");
   modal.classList.add("active");
+  // Clonar botones para eliminar listeners previos (evita callbacks obsoletos)
+  var newOk = okBtn.cloneNode(true);
+  var newCancel = cancelBtn.cloneNode(true);
+  okBtn.parentNode.replaceChild(newOk, okBtn);
+  cancelBtn.parentNode.replaceChild(newCancel, cancelBtn);
   var close = function(){ modal.classList.remove("active"); };
-  okBtn.onclick = function(){ close(); onOk(); };
-  cancelBtn.onclick = close;
+  newOk.onclick = function(){ close(); if(typeof onOk==="function") onOk(); };
+  newCancel.onclick = close;
   modal.onclick = function(e){ if(e.target === modal) close(); };
 }
 
@@ -245,6 +250,14 @@ function importarCSV(input){
 async function importarFotoCuaderno(input){
   var file = input.files[0];
   if(!file){ return; }
+  // Validar API key antes de intentar
+  var apiKey = localStorage.getItem("hlv_anthropic_key")||"";
+  if(!apiKey || apiKey.length < 10){
+    toast("⚠ Configura tu API Key de Anthropic en Administración antes de usar esta función","err",6000);
+    setBKStatus("Falta API Key de Anthropic","err");
+    input.value="";
+    return;
+  }
   setBKStatus("Analizando foto con IA...", "");
   toast("Analizando foto del cuaderno con IA...", "info", 8000);
   var toBase64 = function(f){ return new Promise(function(res,rej){ var r=new FileReader(); r.onload=function(){ res(r.result.split(",")[1]); }; r.onerror=rej; r.readAsDataURL(f); }); };
@@ -373,7 +386,7 @@ function _agregarReservaAINE(r, pasajeros){
       medio:r.fuente==="booking"?"Booking.com":r.medio||"Directo", patente:r.patente||"—", totalPax:r.pax||pasajeros.length
     });
   });
-  localStorage.setItem("hv_registros", JSON.stringify(registros));
+  safeSave("hv_registros", registros);
   sbSet("hv_registros", registros);
 }
 
@@ -385,13 +398,14 @@ function abrirModalPaxFaltantes(reservaId){
   var paxTotal = r.pax || 1;
   document.getElementById("mpfTitulo").textContent = "Pasajeros de: "+r.nombre;
   document.getElementById("mpfSubtitulo").textContent = fmtFC(r.checkin)+" \u2192 "+fmtFC(r.checkout)+" \u00b7 Hab. "+(r.roomNum||"?")+" \u00b7 "+paxTotal+" pax";
+  var _eq=function(s){return String(s||"").replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");};
   var html = "";
   for(var i=0; i<paxTotal; i++){
     var color = i===0 ? "#003580" : "#f48c06";
     var bgColor = i===0 ? "#f0f6ff" : "#fff8f0";
     var label = i===0 ? "Pasajero 1 (titular)" : "Pasajero "+(i+1);
-    var defaultNombre = i===0 ? (r.nombre||"") : "";
-    var defaultPais = r.pais||"";
+    var defaultNombre = i===0 ? _eq(r.nombre||"") : "";
+    var defaultPais = _eq(r.pais||"");
     var defDoc = r.docType==="exento" ? "Pasaporte" : "RUT";
     html += "<div style='background:"+bgColor+";border-radius:8px;padding:10px;margin-bottom:8px;border-left:3px solid "+color+";'>"
       +"<div style='font-size:11px;font-weight:700;color:"+color+";margin-bottom:6px;'>"+label+"</div>"
@@ -588,19 +602,27 @@ function importarBackup(input){
   reader.onload = function(e){
     try{
       var backup = JSON.parse(e.target.result);
-      if(!backup.datos) throw new Error("Formato de backup inválido");
+      if(!backup.datos || typeof backup.datos !== "object") throw new Error("Formato de backup inválido");
+      // Validar tipos de datos antes de restaurar
+      var d = backup.datos;
+      var arrayKeys = ["reservas","booking","registros","sucias","papelera","historialLimpieza","proactLog"];
+      for(var ak=0;ak<arrayKeys.length;ak++){
+        if(d[arrayKeys[ak]] && !Array.isArray(d[arrayKeys[ak]])){
+          throw new Error("Datos corruptos: '"+arrayKeys[ak]+"' no es un array válido");
+        }
+      }
       showConfirm(
         "Restaurar backup",
         "¿Restaurar el backup del " + fmtFC((backup.fecha||"").slice(0,10)) + "? Se reemplazarán TODOS los datos actuales.",
         function(){
-          if(backup.datos.reservas)         localStorage.setItem("hv_reservas",          JSON.stringify(backup.datos.reservas));
-          if(backup.datos.booking)           localStorage.setItem("hv_booking",           JSON.stringify(backup.datos.booking));
-          if(backup.datos.registros)         localStorage.setItem("hv_registros",         JSON.stringify(backup.datos.registros));
-          if(backup.datos.sucias)            localStorage.setItem("hv_sucias",            JSON.stringify(backup.datos.sucias));
-          if(backup.datos.papelera)          localStorage.setItem("hv_papelera",          JSON.stringify(backup.datos.papelera));
-          if(backup.datos.historialLimpieza) localStorage.setItem("hv_historial_limpieza",JSON.stringify(backup.datos.historialLimpieza));
-          if(backup.datos.proactLog) localStorage.setItem("hv_proact_log",JSON.stringify(backup.datos.proactLog));
-          if(backup.datos.proactDisclaimer) localStorage.setItem("hv_proact_disclaimer",JSON.stringify(backup.datos.proactDisclaimer));
+          if(Array.isArray(backup.datos.reservas))         safeSave("hv_reservas",          backup.datos.reservas);
+          if(Array.isArray(backup.datos.booking))           safeSave("hv_booking",           backup.datos.booking);
+          if(Array.isArray(backup.datos.registros))         safeSave("hv_registros",         backup.datos.registros);
+          if(Array.isArray(backup.datos.sucias))            safeSave("hv_sucias",            backup.datos.sucias);
+          if(Array.isArray(backup.datos.papelera))          safeSave("hv_papelera",          backup.datos.papelera);
+          if(Array.isArray(backup.datos.historialLimpieza)) safeSave("hv_historial_limpieza",backup.datos.historialLimpieza);
+          if(Array.isArray(backup.datos.proactLog)) safeSave("hv_proact_log",backup.datos.proactLog);
+          if(backup.datos.proactDisclaimer) safeSave("hv_proact_disclaimer",backup.datos.proactDisclaimer);
           // hv_limpias_hoy no se restaura: es dato con scope de fecha, no histórico
           toast("Backup restaurado. Sincronizando y recargando...", "ok");
           setTimeout(function(){
@@ -627,7 +649,7 @@ function getHistorialLimpieza(){
   catch(e){ return []; }
 }
 function saveHistorialLimpieza(arr){
-  localStorage.setItem("hv_historial_limpieza", JSON.stringify(arr));
+  safeSave("hv_historial_limpieza", arr);
   sbSet("hv_historial_limpieza", arr);
 }
 function registrarLimpiezaHistorial(roomNum){
@@ -852,7 +874,7 @@ function importarCuaderno(silencioso){
         datosFaltantes: true  // activa flujo "Completar datos → INE"
       });
     });
-    localStorage.setItem("hv_reservas", JSON.stringify(resFinal));
+    safeSave("hv_reservas", resFinal);
     sbSet("hv_reservas", resFinal);
   }
 
@@ -971,7 +993,7 @@ function guardarDatosDirecta(){
   r.patente   = document.getElementById("cdPatente")?.value.trim()||"";
   r.datosFaltantes = false;
   reservas[idx] = r;
-  localStorage.setItem("hv_reservas", JSON.stringify(reservas));
+  safeSave("hv_reservas", reservas);
   sbSet("hv_reservas", reservas);
 
   // Registrar en INE
@@ -3049,7 +3071,7 @@ async function doLogin(){
     if(!doLogin._fails) doLogin._fails=0;
     doLogin._fails++;
     if(doLogin._fails >= 3){
-      var btn=document.querySelector("#loginScreen button");
+      var btn=document.querySelector("#loginScreen .ls-btn");
       if(btn){btn.disabled=true;btn.textContent="Espera "+(doLogin._fails*2)+"s...";
         setTimeout(function(){btn.disabled=false;btn.textContent="Ingresar";},doLogin._fails*2000);
       }
@@ -3411,6 +3433,8 @@ function getNDocumento(){ return document.getElementById("nDocumentoInp")?.value
 let esHousekeeper = false;
 
 function doHousekeeping(){
+  // Resetear PIN al abrir nuevo modal
+  _hkPinValue="";
   // Mostrar selector de usuario HK con PIN pad
   const modal = document.createElement("div");
   modal.id = "hkLoginModal";
@@ -3743,7 +3767,7 @@ function getProactLog(){
   catch(e){ return []; }
 }
 function saveProactLog(arr){
-  localStorage.setItem("hv_proact_log", JSON.stringify(arr));
+  safeSave("hv_proact_log", arr);
   sbSet("hv_proact_log", arr);
 }
 function getProactDisclaimer(){
@@ -3751,7 +3775,7 @@ function getProactDisclaimer(){
   catch(e){ return null; }
 }
 function saveProactDisclaimer(obj){
-  localStorage.setItem("hv_proact_disclaimer", JSON.stringify(obj));
+  safeSave("hv_proact_disclaimer", obj);
   sbSet("hv_proact_disclaimer", obj);
 }
 function getProactReminder(){
@@ -3759,7 +3783,7 @@ function getProactReminder(){
   catch(e){ return null; }
 }
 function saveProactReminder(obj){
-  localStorage.setItem("hv_proact_reminder", JSON.stringify(obj));
+  safeSave("hv_proact_reminder", obj);
 }
 
 // ── Disclaimer logic ──
@@ -3932,6 +3956,34 @@ function fmtDia(s){const[y,m,d]=s.split("-");return `${parseInt(d)}/${parseInt(m
 // fmtFC: formatea "YYYY-MM-DD" → "DD/MM/YYYY" sin riesgo de offset UTC
 function fmtFC(s){if(!s||s.length<10)return s||"—";const[y,m,d]=s.slice(0,10).split("-");return `${d}/${m}/${y}`;}
 // ══════════════════════════════
+// Wrapper seguro para localStorage.setItem — maneja quota exceeded
+function safeSave(key,data){
+  try{localStorage.setItem(key,typeof data==="string"?data:JSON.stringify(data));return true;}
+  catch(e){
+    if(e.name==="QuotaExceededError"||e.code===22){
+      toast("⚠️ Almacenamiento lleno. Exporta un backup y limpia datos antiguos.","err",8000);
+      // Intentar liberar espacio eliminando supply keys viejas
+      _cleanOldSupplyKeys();
+    } else { toast("Error guardando datos: "+e.message,"err"); }
+    return false;
+  }
+}
+// Limpieza de supply keys de HK más antiguas de 7 días
+function _cleanOldSupplyKeys(){
+  var hoy=new Date();
+  var keys=[];
+  for(var i=0;i<localStorage.length;i++){keys.push(localStorage.key(i));}
+  keys.forEach(function(k){
+    if(k&&k.startsWith("hv_hk_sup_")){
+      var dateStr=k.split("_")[3]; // hv_hk_sup_YYYY-MM-DD_ROOM
+      if(dateStr){
+        var d=new Date(dateStr+"T12:00:00");
+        var diff=(hoy-d)/(86400000);
+        if(diff>7) localStorage.removeItem(k);
+      }
+    }
+  });
+}
 function getReservas(){try{return JSON.parse(localStorage.getItem("hv_reservas")||"[]");}catch(e){return[];}}
 function roomOccupied(rn,fi,fo){
   const todasRes=[...getReservas(),...getBookingReservas().filter(r=>!r.cancelada)];
@@ -4675,14 +4727,19 @@ function copiar(){
   }
 }
 
+var _guardarLock=false;
 function guardar(){
+  // Debounce: evitar duplicados por doble-click
+  if(_guardarLock){return;}
+  _guardarLock=true;
+  setTimeout(function(){_guardarLock=false;},2000);
   const{i,o}=gF();
-  if(!i||!o){toast("Por favor ingresa las fechas de check-in y check-out.","warn");return;}
-  if(i>=o){toast("La fecha de check-out debe ser posterior al check-in.","warn");return;}
-  if(!gN()){toast("Por favor ingresa el nombre del pasajero o grupo.","warn");return;}
+  if(!i||!o){_guardarLock=false;toast("Por favor ingresa las fechas de check-in y check-out.","warn");return;}
+  if(i>=o){_guardarLock=false;toast("La fecha de check-out debe ser posterior al check-in.","warn");return;}
+  if(!gN()){_guardarLock=false;toast("Por favor ingresa el nombre del pasajero o grupo.","warn");return;}
   // Recalcular noches desde las fechas reales (no depender del global que puede estar stale)
   const nochesCalc=Math.round((parseLocalDate(o)-parseLocalDate(i))/86400000);
-  if(nochesCalc<=0){toast("Fechas inválidas — check-out debe ser posterior al check-in.","warn");return;}
+  if(nochesCalc<=0){_guardarLock=false;toast("Fechas inválidas — check-out debe ser posterior al check-in.","warn");return;}
   // Sincronizar global noches para que subtotalHab() use el valor correcto
   noches=nochesCalc;
   const pax=getPax();
@@ -4694,7 +4751,7 @@ function guardar(){
   const todasParaDup=[...reservas,...getBookingReservas().filter(r=>!r.cancelada)];
   const dupRooms=pax.filter(h=>h.roomNum&&todasParaDup.some(r=>r.roomNum===h.roomNum&&r.checkin<o&&r.checkout>i));
   if(dupRooms.length){
-    toast("⚠️ Hab. "+dupRooms.map(h=>h.roomNum).join(", ")+" ya tiene reserva en esas fechas. Revisa antes de guardar.","err",5000);
+    _guardarLock=false;toast("⚠️ Hab. "+dupRooms.map(h=>h.roomNum).join(", ")+" ya tiene reserva en esas fechas. Revisa antes de guardar.","err",5000);
     return; // Bloquear guardado — doble booking no permitido
   }
   pax.forEach((h,hIdx)=>{
@@ -4726,8 +4783,8 @@ function guardar(){
   });
   const sinHab=pax.filter(h=>!h.roomNum).length;
   if(sinHab>0) toast("⚠️ "+sinHab+" habitación"+(sinHab>1?"es sin disponibilidad":" sin disponibilidad")+" — asigna manualmente en Disponibilidad","warn",5000);
-  localStorage.setItem("hv_reservas",JSON.stringify(reservas));
-  localStorage.setItem("hv_registros",JSON.stringify(registros));
+  safeSave("hv_reservas",reservas);
+  safeSave("hv_registros",registros);
   const b=document.getElementById("gBtn");
   b.disabled=true;
   b.textContent="✓ ¡Guardado!";b.style.background="#185FA5";
@@ -5077,6 +5134,10 @@ function verR(id){
         ${r.nDocumento?`<div style="display:flex;justify-content:space-between;"><span style="color:#666;">📋 N° Documento</span><strong style="color:#1e40af;">${r.nDocumento}</strong></div>`:""}
         ${r.notas?`<div style="display:flex;justify-content:space-between;"><span style="color:#666;">📝 Notas</span><span style="color:#555;text-align:right;max-width:180px;">${esc(r.notas)}</span></div>`:""}
       </div>
+      <div style="display:flex;gap:8px;margin-bottom:8px;">
+        <button onclick="printCheckinSheet('${id}');document.getElementById('${modalId}').remove()" style="flex:1;padding:10px;border:none;border-radius:10px;background:linear-gradient(135deg,#3A2E1E,#5a4a38);color:#fff;cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;">🖨 Ficha Check-in</button>
+        <button onclick="printConfirmacion('${id}');document.getElementById('${modalId}').remove()" style="flex:1;padding:10px;border:none;border-radius:10px;background:linear-gradient(135deg,#1e40af,#2563eb);color:#fff;cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;">📄 Confirmación</button>
+      </div>
       <div style="display:flex;gap:8px;">
         <button onclick="document.getElementById('${modalId}').remove()" style="flex:1;padding:10px;border:1.5px solid #ddd;border-radius:10px;background:#fff;cursor:pointer;font-size:13px;font-family:inherit;color:#555;">Cerrar</button>
         <button onclick="delReserva('${id}',document.getElementById('${modalId}'))" style="flex:1;padding:10px;border:none;border-radius:10px;background:#dc2626;color:#fff;cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;">🗑 Eliminar</button>
@@ -5145,6 +5206,10 @@ function verBK(id){
         ${bk.docType?`<div style="display:flex;justify-content:space-between;"><span style="color:#666;">🧾 Documento</span><strong>${{"boleta":"Boleta","factura":"Factura","exento":"Exento (turista)"}[bk.docType]||bk.docType}</strong></div>`:""}
         ${bk.notas?`<div style="display:flex;justify-content:space-between;"><span style="color:#666;">📝 Notas</span><span style="color:#555;text-align:right;max-width:200px;">${esc(bk.notas)}</span></div>`:""}
       </div>
+      <div style="display:flex;gap:8px;margin-bottom:8px;">
+        <button onclick="printCheckinSheet('${id}');document.getElementById('${modalId}').remove()" style="flex:1;padding:10px;border:none;border-radius:10px;background:linear-gradient(135deg,#3A2E1E,#5a4a38);color:#fff;cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;">🖨 Ficha Check-in</button>
+        <button onclick="printConfirmacion('${id}');document.getElementById('${modalId}').remove()" style="flex:1;padding:10px;border:none;border-radius:10px;background:linear-gradient(135deg,#1e40af,#2563eb);color:#fff;cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;">📄 Confirmación</button>
+      </div>
       <div style="display:flex;gap:8px;">
         <button onclick="document.getElementById('${modalId}').remove()" style="flex:1;padding:10px;border:1.5px solid #ddd;border-radius:10px;background:#fff;cursor:pointer;font-size:13px;font-family:inherit;color:#555;">Cerrar</button>
         <button onclick="delBKReserva('${id}',document.getElementById('${modalId}'))" style="flex:1;padding:10px;border:none;border-radius:10px;background:#dc2626;color:#fff;cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;">🗑 Eliminar</button>
@@ -5183,7 +5248,7 @@ function delReserva(id, modalEl){
       savePapelera(papelera);
     }
     const updated = reservas.filter(x=>x.id!==id);
-    localStorage.setItem("hv_reservas", JSON.stringify(updated));
+    safeSave("hv_reservas", updated);
     sbSet("hv_reservas", updated);
     rDisp();
     try{ rTabla(); }catch(e){}
@@ -5196,7 +5261,7 @@ function delReserva(id, modalEl){
 // ASEO DE HABITACIONES
 // ══════════════════════════════
 function getSucias(){try{return JSON.parse(localStorage.getItem("hv_sucias")||"[]");}catch(e){return[];}}
-function saveSucias(arr){localStorage.setItem("hv_sucias",JSON.stringify(arr));}
+function saveSucias(arr){safeSave("hv_sucias",arr);}
 
 // Track rooms explicitly marked clean today → prevent re-auto-adding
 function getLimpiasHoy(){
@@ -5208,7 +5273,7 @@ function getLimpiasHoy(){
 }
 function saveLimpiasHoy(arr){
   const hoy=hoyISO();
-  localStorage.setItem("hv_limpias_hoy",JSON.stringify({fecha:hoy,rooms:arr}));
+  safeSave("hv_limpias_hoy",{fecha:hoy,rooms:arr});
 }
 
 // Auto-detectar habitaciones que necesitan aseo:
@@ -5591,7 +5656,7 @@ function delReg(id){
     function(){
       // 1. Remove from registros
       const updatedReg = reg.filter(r=>String(r.id)!==String(id));
-      localStorage.setItem("hv_registros", JSON.stringify(updatedReg));
+      safeSave("hv_registros", updatedReg);
       sbSet("hv_registros", updatedReg);
 
       // 2. Remove matching reserva from calendar ONLY if no other INE records remain for it
@@ -5628,7 +5693,7 @@ function delReg(id){
             }
             return true;
           });
-          localStorage.setItem("hv_reservas", JSON.stringify(updatedRes));
+          safeSave("hv_reservas", updatedRes);
           sbSet("hv_reservas", updatedRes);
         }
       }
@@ -6380,7 +6445,7 @@ function fillDateParts(fieldId, isoDate){
 function getPapelera(){ try{ return JSON.parse(localStorage.getItem("hv_papelera")||"[]"); }catch(e){ return []; } }
 
 function savePapelera(arr){
-  localStorage.setItem("hv_papelera", JSON.stringify(arr));
+  safeSave("hv_papelera", arr);
   sbSet("hv_papelera", arr);
   updatePapeleraBadges();
 }
@@ -6468,7 +6533,7 @@ function restaurarReserva(idx){
     const reservas = getReservas();
     if(!reservas.find(x=>x.id===r.id)){
       reservas.push(r);
-      localStorage.setItem("hv_reservas", JSON.stringify(reservas));
+      safeSave("hv_reservas", reservas);
       sbSet("hv_reservas", reservas);
     }
   }
@@ -7029,9 +7094,9 @@ function setupRealtimeListeners(){
         const {key, value} = payload.new || {};
         if(!key || value===undefined) return;
         const cur = localStorage.getItem(key);
-        const inc = JSON.stringify(value);
+        const inc = typeof value==="string"?value:JSON.stringify(value);
         if(cur !== inc){
-          localStorage.setItem(key, inc);
+          safeSave(key, value);
           if(callbacks[key]) callbacks[key]();
           else if(key.startsWith("hv_hk_sup_")){
             try{ if(document.getElementById("hkApp").style.display!=="none") renderHK(); }catch(e){}
@@ -7053,14 +7118,14 @@ function setupRealtimeListeners(){
 
 // ── Overrides (mismos nombres que antes) ─────────────────────────
 saveSucias = function(arr){
-  localStorage.setItem("hv_sucias", JSON.stringify(arr));
+  safeSave("hv_sucias", arr);
   sbSet("hv_sucias", arr);
 };
 
 saveLimpiasHoy = function(arr){
   const hoy=hoyISO();
   const obj={fecha:hoy, rooms:arr};
-  localStorage.setItem("hv_limpias_hoy", JSON.stringify(obj));
+  safeSave("hv_limpias_hoy", obj);
   sbSet("hv_limpias_hoy", obj);
 };
 
@@ -7075,7 +7140,7 @@ guardar = function(){
 };
 
 function fbSaveBooking(arr){
-  localStorage.setItem("hv_booking", JSON.stringify(arr));
+  safeSave("hv_booking", arr);
   sbSet("hv_booking", arr);
 }
 async function fbClearBooking(){
@@ -7084,7 +7149,7 @@ async function fbClearBooking(){
 }
 function fbDeleteRegistro(id){
   const updated = getReg().filter(r=>String(r.id)!==String(id));
-  localStorage.setItem("hv_registros", JSON.stringify(updated));
+  safeSave("hv_registros", updated);
   sbSet("hv_registros", updated);
 }
 async function fbLimpiarTodo(){
