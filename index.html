@@ -417,7 +417,7 @@ function abrirModalPaxFaltantes(reservaId){
 function guardarPaxFaltantes(){
   if(!_mpfReservaActual) return;
   var r = _mpfReservaActual;
-  var paxTotal = r.pax || 2;
+  var paxTotal = r.pax || 1;
   var pasajeros = [];
   var getMpf=function(field,idx){var el=document.querySelector(".mpf-inp[data-field='"+field+"'][data-idx='"+idx+"']");return el?el.value.trim():"";};
   for(var i=0; i<paxTotal; i++){
@@ -510,12 +510,16 @@ document.addEventListener("keydown",function(e){
     // Cerrar printDoc si está abierto
     var pd=document.getElementById("printDoc");
     if(pd && pd.style.display!=="none"){closePrintDoc();return;}
-    // Cerrar modales dinámicos (HK login, ver reserva, etc)
-    var modals=document.querySelectorAll("[id$='Modal'][style*='flex'],[id$='Modal'][style*='block']");
-    if(modals.length>0){modals[modals.length-1].remove();return;}
-    // Cerrar papelera
+    // Cerrar papelera (estático — ocultar, no remover)
     var pap=document.getElementById("papeleraModal");
     if(pap && pap.style.display!=="none"){closePapelera();return;}
+    // Cerrar modales dinámicos (generados con createElement — solo esos se remueven)
+    // Excluir modales estáticos: confirmModal, inputModal, modalPaxFaltantes, modalDatosDirecta, papeleraModal
+    var staticIds=["confirmModal","inputModal","modalPaxFaltantes","modalDatosDirecta","papeleraModal","fbModal"];
+    var dynModals=document.querySelectorAll("[id$='Modal'][style*='flex'],[id$='Modal'][style*='block'],[id$='LoginModal'][style*='flex']");
+    for(var i=dynModals.length-1;i>=0;i--){
+      if(!staticIds.includes(dynModals[i].id)){dynModals[i].remove();return;}
+    }
   }
 });
 
@@ -3931,7 +3935,7 @@ function fmtFC(s){if(!s||s.length<10)return s||"—";const[y,m,d]=s.slice(0,10).
 function getReservas(){try{return JSON.parse(localStorage.getItem("hv_reservas")||"[]");}catch(e){return[];}}
 function roomOccupied(rn,fi,fo){
   const todasRes=[...getReservas(),...getBookingReservas().filter(r=>!r.cancelada)];
-  return todasRes.some(r=>r.roomNum===rn&&r.checkin<fo&&r.checkout>fi);
+  return todasRes.some(r=>Number(r.roomNum)===Number(rn)&&r.checkin<fo&&r.checkout>fi);
 }
 function asignarHab(tipoIdx,fi,fo,excludeRooms){
   if(!fi||!fo)return null;
@@ -3981,7 +3985,7 @@ function rDash(){
   const todas=[...getReservas(),...getBookingReservas()];
   const activas=todas.filter(r=>!r.cancelada&&r.roomNum);
   const ocupadas=activas.filter(r=>r.checkin<=HOY&&r.checkout>HOY);
-  const pctOcup=Math.round(ocupadas.length/29*100);
+  const pctOcup=Math.round(ocupadas.length/ALL_ROOMS.length*100);
   const checkins=activas.filter(r=>r.checkin===HOY);
   const checkouts=activas.filter(r=>r.checkout===HOY);
   const ingresos=checkins.reduce((s,r)=>{
@@ -4000,7 +4004,7 @@ function rDash(){
   const icoSpk='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v4M5.63 6.63l2.83 2.83M3 13h4M5.63 19.37l2.83-2.83M12 21v-4M18.37 19.37l-2.83-2.83M21 13h-4M18.37 6.63l-2.83 2.83"/></svg>';
   // KPI cards
   const kpis=[
-    {cls:"dash-card--ocup",ico:icoMtn,label:"Ocupación hoy",valor:pctOcup+"%",sub:ocupadas.length+" de 29 hab."},
+    {cls:"dash-card--ocup",ico:icoMtn,label:"Ocupación hoy",valor:pctOcup+"%",sub:ocupadas.length+" de "+ALL_ROOMS.length+" hab."},
     {cls:"dash-card--ing",ico:icoCoin,label:"Ingresos del día",valor:"$"+ingresos.toLocaleString("es-CL"),sub:checkins.length+" check-in"+(checkins.length!==1?"s":"")},
     {cls:"dash-card--ci",ico:icoSun,label:"Check-ins hoy",valor:pendientes,sub:pendientes===0?"Sin llegadas":"Llegada"+(pendientes!==1?"s":"")+" hoy"},
     {cls:"dash-card--suc",ico:icoSpk,label:"Hab. sucias",valor:sucias,sub:sucias===0?"Todo limpio":sucias+" pendiente"+(sucias!==1?"s":"")}
@@ -4679,6 +4683,8 @@ function guardar(){
   // Recalcular noches desde las fechas reales (no depender del global que puede estar stale)
   const nochesCalc=Math.round((parseLocalDate(o)-parseLocalDate(i))/86400000);
   if(nochesCalc<=0){toast("Fechas inválidas — check-out debe ser posterior al check-in.","warn");return;}
+  // Sincronizar global noches para que subtotalHab() use el valor correcto
+  noches=nochesCalc;
   const pax=getPax();
   const totalH=items.reduce((a,it)=>a+it.huespedes,0);
   let reservas=getReservas();
@@ -4843,8 +4849,8 @@ function rDisp(){
     const borderStyle=esSucia?"":"border-left:4px solid "+rc.bg+";";
     html+=`<tr><td class="${habCls}" style="${borderStyle}">${rn}<span class="${tipoCls[tipo]}">${tipoLbl[tipo]}</span></td>`;
     dias.forEach(d=>{
-      const res=reservas.find(r=>r.roomNum===rn&&r.checkin<=d&&r.checkout>d);
-      const bk=!res?bkRes.find(r=>r.roomNum===rn&&r.checkin<=d&&r.checkout>d&&!r.cancelada):null;
+      const res=reservas.find(r=>Number(r.roomNum)===rn&&r.checkin<=d&&r.checkout>d);
+      const bk=!res?bkRes.find(r=>Number(r.roomNum)===rn&&r.checkin<=d&&r.checkout>d&&!r.cancelada):null;
       const esHoy=d===HOY;
       const hoyCls=esHoy?" cel-today":"";
       const _dt14=new Date(d+"T12:00:00");const _wb14=vistaD==="14d"&&_dt14.getDay()===1?"border-left:2px solid rgba(200,149,108,0.25);":"";
@@ -5145,8 +5151,8 @@ function verBK(id){
       </div>
     </div>`;
   document.body.appendChild(modal);
-  modal.addEventListener("click",e=>{ if(e.target===modal) modal.remove(); });
   const escR=(e)=>{ if(e.key==="Escape"){ modal.remove(); document.removeEventListener("keydown",escR); } };
+  modal.addEventListener("click",e=>{ if(e.target===modal){modal.remove();document.removeEventListener("keydown",escR);} });
   document.addEventListener("keydown",escR);
 }
 
@@ -6207,7 +6213,7 @@ function renderFinAnio(todas){
       anios[anio].total+=pNoche;
       anios[anio].habDias++;
       anios[anio].nRes.add(r.id||r.roomNum+r.checkin);
-      anios[anio].paxTotal=Math.max(anios[anio].paxTotal,(anios[anio].paxTotal||0)); // tracked via nRes
+      anios[anio].paxTotal+=(parseInt(r.pax)||1); // acumular pax desde reservas
       anios[anio].meses.add(isoLocal(d).slice(0,7));
     }
   });
@@ -6805,7 +6811,7 @@ function printReporteDiario(){
       ingresosDia+=(PRECIOS[r.tipo]||55000)*(parseInt(r.noches)||1);
     }
   });
-  var pctOcup=Math.round(ocupadas.length/29*100);
+  var pctOcup=Math.round(ocupadas.length/ALL_ROOMS.length*100);
 
   var html=_printBtnBar()+_printHeader("Reporte Diario de Operaciones", _fmtDatePrint(hoy));
 
