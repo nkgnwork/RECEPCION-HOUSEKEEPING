@@ -1300,12 +1300,12 @@ function _renderUsuariosModal(){
   }).join("");
   modal.innerHTML = '<div style="background:var(--c,#fff);color:var(--t,#222);max-width:900px;width:100%;max-height:90vh;overflow:auto;border-radius:12px;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.5);">'
     + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;border-bottom:2px solid #D4A96A;padding-bottom:12px;">'
-    + '<h2 style="margin:0;font-size:20px;">👥 Gestión de Usuarios</h2>'
+    + '<h2 style="margin:0;font-size:18px;font-family:var(--font-display);font-weight:700;letter-spacing:0.02em;">Gestión de usuarios</h2>'
     + '<button onclick="document.getElementById(\'usuariosModal\').remove()" style="background:none;border:none;font-size:24px;cursor:pointer;color:#888;">×</button>'
     + '</div>'
-    + '<button onclick="_uiCrearUsuario()" style="background:#D4A96A;color:#3A2E1E;border:none;padding:10px 16px;border-radius:8px;font-weight:700;cursor:pointer;margin-bottom:16px;">+ Nuevo usuario</button>'
+    + '<button onclick="_uiCrearUsuario()" style="background:#3A2E1E;color:#FAF6F0;border:none;padding:10px 18px;border-radius:8px;font-weight:600;cursor:pointer;margin-bottom:16px;font-family:var(--font-body);font-size:12px;letter-spacing:0.03em;">Nuevo usuario</button>'
     + '<table style="width:100%;border-collapse:collapse;font-size:13px;"><thead><tr style="background:#FAF6F0;color:#3A2E1E;"><th style="padding:10px;text-align:left;">Usuario</th><th style="padding:10px;text-align:left;">Rol</th><th style="padding:10px;text-align:left;">Estado</th><th style="padding:10px;text-align:right;">Acciones</th></tr></thead><tbody>'+rows+'</tbody></table>'
-    + '<div style="margin-top:16px;padding:12px;background:#FFF8E7;border-left:3px solid #D4A96A;font-size:11px;color:#7A5A2E;border-radius:4px;">💡 Cada usuario tiene su propio password y PIN. El PIN se solicita para acciones críticas (eliminar reservas, modificar montos, vaciar papelera).</div>'
+    + '<div style="margin-top:16px;padding:12px;background:#FFF8E7;border-left:3px solid #D4A96A;font-size:11px;color:#7A5A2E;border-radius:4px;line-height:1.5;">Cada usuario tiene su propio password y PIN. El PIN se solicita para acciones críticas (eliminar reservas, modificar montos, vaciar papelera).</div>'
     + '</div>';
   modal.addEventListener("click", function(e){ if(e.target===modal) modal.remove(); });
   document.body.appendChild(modal);
@@ -1401,12 +1401,12 @@ function _renderAuditModal(filterText){
   }).join("") || '<tr><td colspan="4" style="padding:20px;text-align:center;color:#888;">Sin registros</td></tr>';
   modal.innerHTML = '<div style="background:var(--c,#fff);color:var(--t,#222);max-width:1100px;width:100%;max-height:90vh;overflow:auto;border-radius:12px;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,.5);">'
     + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;border-bottom:2px solid #D4A96A;padding-bottom:12px;">'
-    + '<h2 style="margin:0;font-size:20px;">📋 Registro de Auditoría <span style="font-size:12px;color:#888;font-weight:400;">('+log.length+' eventos)</span></h2>'
+    + '<h2 style="margin:0;font-size:18px;font-family:var(--font-display);font-weight:700;letter-spacing:0.02em;">Registro de auditoría <span style="font-size:11px;color:#888;font-weight:400;font-family:var(--font-body);">('+log.length+' eventos)</span></h2>'
     + '<button onclick="document.getElementById(\'auditModal\').remove()" style="background:none;border:none;font-size:24px;cursor:pointer;color:#888;">×</button>'
     + '</div>'
     + '<input id="auditFilter" placeholder="Filtrar por usuario, acción, motivo..." value="'+esc(filterText||"")+'" oninput="_renderAuditModal(this.value)" style="width:100%;padding:8px 12px;border:1px solid #ddd;border-radius:6px;margin-bottom:12px;font-size:13px;">'
     + '<table style="width:100%;border-collapse:collapse;font-size:12px;"><thead><tr style="background:#FAF6F0;color:#3A2E1E;"><th style="padding:8px;text-align:left;">Fecha</th><th style="padding:8px;text-align:left;">Usuario</th><th style="padding:8px;text-align:left;">Acción</th><th style="padding:8px;text-align:left;">Objetivo</th></tr></thead><tbody>'+rows+'</tbody></table>'
-    + '<div style="margin-top:16px;padding:12px;background:#FFF8E7;border-left:3px solid #D4A96A;font-size:11px;color:#7A5A2E;border-radius:4px;">⚠ Este registro es inmutable. Las acciones críticas (eliminaciones, modificaciones financieras, login fallidos) quedan trazadas con su autor, fecha y motivo. Mostrando últimos 500 eventos.</div>'
+    + '<div style="margin-top:16px;padding:12px;background:#FFF8E7;border-left:3px solid #D4A96A;font-size:11px;color:#7A5A2E;border-radius:4px;line-height:1.5;">Este registro es inmutable. Las acciones críticas (eliminaciones, modificaciones financieras, login fallidos) quedan trazadas con su autor, fecha y motivo. Mostrando últimos 500 eventos.</div>'
     + '</div>';
   modal.addEventListener("click", function(e){ if(e.target===modal) modal.remove(); });
   document.body.appendChild(modal);
@@ -1725,7 +1725,7 @@ body::before{
 .sidebar{width:240px;min-width:240px;height:100vh;background:linear-gradient(180deg,#2a1f14 0%,#3A2E1E 40%,#33261a 100%);color:#FAF6F0;display:flex;flex-direction:column;overflow:hidden;z-index:50;flex-shrink:0;border-right:1px solid rgba(200,149,108,0.12);}
 .sb-logo{display:flex;align-items:center;gap:12px;padding:20px 18px 16px;position:relative;}
 .sb-logo::after{content:'';position:absolute;bottom:0;left:18px;right:18px;height:1px;background:linear-gradient(90deg,transparent,rgba(212,169,106,0.25),transparent);}
-.sb-logo-icon{font-size:28px;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.3));}
+.sb-logo-mark{background:#FAF6F0;border-radius:10px;padding:6px 8px;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.25);}
 .sb-logo-name{font-family:var(--font-display);font-size:16px;font-weight:700;letter-spacing:0.01em;color:#FAF6F0;}
 .sb-logo-sub{font-size:10px;color:rgba(250,246,240,0.4);margin-top:1px;letter-spacing:0.03em;}
 .sb-sep{height:1px;margin:6px 18px;background:rgba(250,246,240,0.06);}
@@ -3325,7 +3325,7 @@ window.addEventListener('unhandledrejection',function(e){console.error('Promise:
   <!-- ═══ SIDEBAR ═══ -->
   <aside class="sidebar" id="sidebar">
     <div class="sb-logo">
-      <span class="sb-logo-icon">🦙</span>
+      <div class="sb-logo-mark"><img src="" id="sbLogoImg" alt="Hotel Las Vicuñas" style="width:42px;height:auto;display:block;"></div>
       <div class="sb-logo-text">
         <div class="sb-logo-name">Las Vicuñas</div>
         <div class="sb-logo-sub">Putre · 3500 msnm</div>
@@ -3660,7 +3660,8 @@ window.addEventListener('unhandledrejection',function(e){console.error('Promise:
   <div class="wrap">
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:2px;">
       <div class="fin-tabs" style="margin-bottom:0;">
-        <button class="fin-tab on" id="ftRes" onclick="setFinTab('res')">📊 Resumen IVA</button>
+        <button class="fin-tab on" id="ftRes" onclick="setFinTab('res')">Resumen IVA</button>
+        <button class="fin-tab" id="ftKpi" onclick="setFinTab('kpi')">KPIs Avanzados</button>
         <button class="fin-tab" id="ftDia" onclick="setFinTab('dia')">Por día</button>
         <button class="fin-tab" id="ftSem" onclick="setFinTab('sem')">Por semana</button>
         <button class="fin-tab" id="ftMes" onclick="setFinTab('mes')">Por mes</button>
@@ -3670,6 +3671,7 @@ window.addEventListener('unhandledrejection',function(e){console.error('Promise:
     </div>
     <div class="fin-selector" id="finSelector"></div>
     <div id="finResumenTab"></div>
+    <div id="finKpiAdvTab" style="display:none;"></div>
     <div id="finKpisWrap">
       <div class="fin-kpis" id="finKpis"></div>
       <div class="fin-bar-wrap" id="finBars"></div>
@@ -3739,6 +3741,12 @@ function iniciarApp(admin){
   appEl.style.display="flex";
   appEl.classList.add("on");
   syncDarkToggleText();
+  // Copiar logo embebido al sidebar
+  try{
+    var lsImg=document.querySelector(".ls-logo");
+    var sbImg=document.getElementById("sbLogoImg");
+    if(lsImg && sbImg && lsImg.src) sbImg.src=lsImg.src;
+  }catch(e){}
   document.getElementById("rolBadge").textContent = admin ? "Administrador" : "Solo lectura";
   document.getElementById("guestBanner").style.display = admin ? "none" : "block";
   document.querySelectorAll(".pg").forEach(p=>p.classList.remove("on"));
@@ -6400,14 +6408,17 @@ let finTab="res";
 
 function setFinTab(t){
   finTab=t;
-  ["res","dia","sem","mes","anio"].forEach(x=>{
+  ["res","kpi","dia","sem","mes","anio"].forEach(x=>{
     const btn=document.getElementById("ft"+x.charAt(0).toUpperCase()+x.slice(1));
     if(btn) btn.classList.toggle("on",x===t);
   });
   const kpisWrap=document.getElementById("finKpisWrap");
   const resTab=document.getElementById("finResumenTab");
-  if(kpisWrap) kpisWrap.style.display=(t==="res")?"none":"block";
+  const kpiAdvTab=document.getElementById("finKpiAdvTab");
+  // Tabs especiales con su propio contenedor
+  if(kpisWrap) kpisWrap.style.display=(t==="res"||t==="kpi")?"none":"block";
   if(resTab) resTab.style.display=(t==="res")?"block":"none";
+  if(kpiAdvTab) kpiAdvTab.style.display=(t==="kpi")?"block":"none";
   rFin();
 }
 
@@ -6473,10 +6484,13 @@ function rFin(){
     return;
   }
 
-  if(kpisWrap) kpisWrap.style.display=(finTab==="res")?"none":"block";
+  if(kpisWrap) kpisWrap.style.display=(finTab==="res"||finTab==="kpi")?"none":"block";
   if(resTab) resTab.style.display=(finTab==="res")?"block":"none";
+  var kpiAdvTab=document.getElementById("finKpiAdvTab");
+  if(kpiAdvTab) kpiAdvTab.style.display=(finTab==="kpi")?"block":"none";
 
   if(finTab==="res") renderFinResumen(todas);
+  else if(finTab==="kpi") renderFinKpisAvanzados(todas);
   else if(finTab==="dia") renderFinDia(todas);
   else if(finTab==="sem") renderFinSem(todas);
   else if(finTab==="anio") renderFinAnio(todas);
@@ -6708,6 +6722,217 @@ function setFinIvaAnio(){
   desdeEl.value=y+"-01-01";
   hastaEl.value=y+"-12-31";
   rFin();
+}
+
+// ─── KPIs AVANZADOS ─────────────────────────────────────────
+// ADR, RevPAR, ALOS, ocupación, lead time, mix por fuente/tipo, cancelaciones
+let _kpiPeriodoCustom = null;
+function setKpiPeriodo(meses){
+  const hoy=new Date();
+  const hasta=isoLocal(hoy);
+  const desdeD=new Date(hoy); desdeD.setMonth(desdeD.getMonth()-meses); desdeD.setDate(desdeD.getDate()+1);
+  _kpiPeriodoCustom={desde:isoLocal(desdeD), hasta:hasta};
+  rFin();
+}
+function setKpiPeriodoYTD(){
+  const y=new Date().getFullYear();
+  _kpiPeriodoCustom={desde:y+"-01-01", hasta:isoLocal(new Date())};
+  rFin();
+}
+function setKpiPeriodoCustom(){
+  const desde=document.getElementById("kpiDesde")?.value;
+  const hasta=document.getElementById("kpiHasta")?.value;
+  if(desde && hasta){ _kpiPeriodoCustom={desde:desde,hasta:hasta}; rFin(); }
+}
+
+function renderFinKpisAvanzados(todas){
+  const cont=document.getElementById("finKpiAdvTab");
+  if(!cont) return;
+  // Selector de período: por defecto últimos 30 días
+  if(!_kpiPeriodoCustom){
+    const hoy=new Date();
+    const hasta=isoLocal(hoy);
+    const d=new Date(hoy); d.setDate(d.getDate()-29);
+    _kpiPeriodoCustom={desde:isoLocal(d), hasta:hasta};
+  }
+  const desde=_kpiPeriodoCustom.desde, hasta=_kpiPeriodoCustom.hasta;
+  const desdeD=parseLocalDate(desde), hastaD=parseLocalDate(hasta);
+  const diasPeriodo=Math.max(1, Math.round((hastaD-desdeD)/86400000)+1);
+  const habsTotal=ALL_ROOMS.length;
+  const inventarioNoches=habsTotal*diasPeriodo;
+
+  // Recolectar reservas activas y filtrar por overlap con período
+  const todasConCancel=[...getReservas(),...getBookingReservas()].filter(r=>r.checkin&&r.checkout&&r.checkin<r.checkout);
+  const enPeriodo=todasConCancel.filter(r=>{
+    if(r.cancelada) return false;
+    return r.checkin<=hasta && r.checkout>desde;
+  });
+  const cancEnPeriodo=todasConCancel.filter(r=>r.cancelada && r.checkin<=hasta && r.checkout>desde);
+
+  // Calcular noches dentro del rango por reserva + ingreso prorrateado
+  let nochesOcupadas=0, ingresoTotal=0, nReservas=0, nochesTotalReservas=0;
+  let porFuente={booking:{noches:0,ingreso:0,res:0},directo:{noches:0,ingreso:0,res:0},cuaderno:{noches:0,ingreso:0,res:0}};
+  let porTipo={};
+  let leadTimes=[];
+  enPeriodo.forEach(r=>{
+    const totalNoches=nochesReales(r);
+    const precioTotal=getPrecioReserva(r);
+    const pNoche=totalNoches>0?precioTotal/totalNoches:0;
+    let nEnRango=0;
+    const _co=parseLocalDate(r.checkout);
+    for(let d=parseLocalDate(r.checkin);d<_co;d.setDate(d.getDate()+1)){
+      const di=isoLocal(d);
+      if(di>=desde && di<=hasta) nEnRango++;
+    }
+    if(nEnRango<=0) return;
+    nochesOcupadas+=nEnRango;
+    ingresoTotal+=Math.round(pNoche*nEnRango);
+    nReservas++;
+    nochesTotalReservas+=totalNoches;
+    // Fuente
+    const fuente=r.fuente==="booking"?"booking":((r.id&&String(r.id).startsWith("CUAD_"))?"cuaderno":"directo");
+    if(porFuente[fuente]){ porFuente[fuente].noches+=nEnRango; porFuente[fuente].ingreso+=Math.round(pNoche*nEnRango); porFuente[fuente].res++; }
+    // Tipo de habitación
+    const tp=r.tipo||(HABS[r.tipoIdx]&&HABS[r.tipoIdx].nombre)||"otro";
+    if(!porTipo[tp]) porTipo[tp]={noches:0,ingreso:0,res:0};
+    porTipo[tp].noches+=nEnRango;
+    porTipo[tp].ingreso+=Math.round(pNoche*nEnRango);
+    porTipo[tp].res++;
+    // Lead time (si tenemos createdAt o timestamp en id)
+    let creado=null;
+    if(r.createdAt) creado=new Date(r.createdAt);
+    else if(r.timestamp) creado=new Date(r.timestamp);
+    if(creado && !isNaN(creado)){
+      const lt=Math.round((parseLocalDate(r.checkin)-creado)/86400000);
+      if(lt>=0 && lt<=365) leadTimes.push(lt);
+    }
+  });
+
+  // Métricas clave
+  const occupancy=inventarioNoches>0?(nochesOcupadas/inventarioNoches*100):0;
+  const adr=nochesOcupadas>0?(ingresoTotal/nochesOcupadas):0;
+  const revpar=inventarioNoches>0?(ingresoTotal/inventarioNoches):0;
+  const alos=nReservas>0?(nochesTotalReservas/nReservas):0;
+  const cancRate=(nReservas+cancEnPeriodo.length)>0?(cancEnPeriodo.length/(nReservas+cancEnPeriodo.length)*100):0;
+  const leadAvg=leadTimes.length>0?(leadTimes.reduce((a,b)=>a+b,0)/leadTimes.length):null;
+
+  // Helpers
+  const fmtPct=v=>v.toFixed(1)+"%";
+  const fmtMoney=v=>"$"+Math.round(v).toLocaleString("es-CL");
+  const fmtDays=v=>v.toFixed(1)+" días";
+
+  // Selector de período
+  const selectorHtml=`
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px;padding:12px 16px;background:var(--s);border:.5px solid var(--b);border-radius:var(--rl);">
+      <span style="font-size:10px;font-weight:700;color:var(--t2);text-transform:uppercase;letter-spacing:.08em;">Período</span>
+      <input type="date" id="kpiDesde" value="${desde}" onchange="setKpiPeriodoCustom()" style="padding:5px 8px;font-size:12px;border:1px solid var(--b2);border-radius:var(--r);background:var(--s);color:var(--t);font-family:inherit;">
+      <span style="font-size:11px;color:var(--t3);">→</span>
+      <input type="date" id="kpiHasta" value="${hasta}" onchange="setKpiPeriodoCustom()" style="padding:5px 8px;font-size:12px;border:1px solid var(--b2);border-radius:var(--r);background:var(--s);color:var(--t);font-family:inherit;">
+      <button onclick="setKpiPeriodo(1)" style="padding:4px 10px;font-size:11px;border:1px solid var(--b2);border-radius:var(--r);background:var(--s);cursor:pointer;color:var(--t2);font-family:inherit;">30 días</button>
+      <button onclick="setKpiPeriodo(3)" style="padding:4px 10px;font-size:11px;border:1px solid var(--b2);border-radius:var(--r);background:var(--s);cursor:pointer;color:var(--t2);font-family:inherit;">90 días</button>
+      <button onclick="setKpiPeriodo(12)" style="padding:4px 10px;font-size:11px;border:1px solid var(--b2);border-radius:var(--r);background:var(--s);cursor:pointer;color:var(--t2);font-family:inherit;">12 meses</button>
+      <button onclick="setKpiPeriodoYTD()" style="padding:4px 10px;font-size:11px;border:1px solid var(--cam);border-radius:var(--r);background:#fdf0e6;cursor:pointer;color:var(--mar);font-weight:600;font-family:inherit;">YTD</button>
+      <span style="margin-left:auto;font-size:11px;color:var(--t3);">${diasPeriodo} día${diasPeriodo!==1?"s":""} · ${habsTotal} hab.</span>
+    </div>`;
+
+  // KPI cards principales
+  const kpiCardCss="background:var(--s);border:.5px solid var(--b);border-radius:var(--rl);padding:18px 20px;box-shadow:var(--sh-xs);";
+  const kpiLabelCss="font-size:10px;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px;";
+  const kpiValCss="font-size:28px;font-weight:800;color:var(--t);font-family:var(--font-display);line-height:1;margin-bottom:4px;";
+  const kpiSubCss="font-size:11px;color:var(--t3);";
+
+  const cardsHtml=`
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:16px;">
+      <div style="${kpiCardCss}border-left:3px solid #D4A96A;">
+        <div style="${kpiLabelCss}">Ocupación</div>
+        <div style="${kpiValCss}">${fmtPct(occupancy)}</div>
+        <div style="${kpiSubCss}">${nochesOcupadas} de ${inventarioNoches} noches-hab.</div>
+      </div>
+      <div style="${kpiCardCss}border-left:3px solid #2dd468;">
+        <div style="${kpiLabelCss}">ADR <span title="Average Daily Rate — ingreso promedio por noche ocupada" style="cursor:help;color:#aaa;font-weight:400;">·info</span></div>
+        <div style="${kpiValCss}">${fmtMoney(adr)}</div>
+        <div style="${kpiSubCss}">Tarifa promedio diaria</div>
+      </div>
+      <div style="${kpiCardCss}border-left:3px solid #7c3aed;">
+        <div style="${kpiLabelCss}">RevPAR <span title="Revenue Per Available Room — ingreso por habitación disponible. RevPAR = Ocupación × ADR" style="cursor:help;color:#aaa;font-weight:400;">·info</span></div>
+        <div style="${kpiValCss}">${fmtMoney(revpar)}</div>
+        <div style="${kpiSubCss}">Ingreso por hab. disponible</div>
+      </div>
+      <div style="${kpiCardCss}border-left:3px solid #0369a1;">
+        <div style="${kpiLabelCss}">Ingreso total</div>
+        <div style="${kpiValCss}">${fmtMoney(ingresoTotal)}</div>
+        <div style="${kpiSubCss}">${nReservas} reserva${nReservas!==1?"s":""} en el período</div>
+      </div>
+      <div style="${kpiCardCss}border-left:3px solid #b45309;">
+        <div style="${kpiLabelCss}">ALOS <span title="Average Length of Stay — estadía promedio en noches" style="cursor:help;color:#aaa;font-weight:400;">·info</span></div>
+        <div style="${kpiValCss}">${fmtDays(alos)}</div>
+        <div style="${kpiSubCss}">Estadía promedio</div>
+      </div>
+      <div style="${kpiCardCss}border-left:3px solid #dc2626;">
+        <div style="${kpiLabelCss}">Cancelaciones</div>
+        <div style="${kpiValCss}">${fmtPct(cancRate)}</div>
+        <div style="${kpiSubCss}">${cancEnPeriodo.length} canceladas</div>
+      </div>
+      <div style="${kpiCardCss}border-left:3px solid #15803d;">
+        <div style="${kpiLabelCss}">Lead time promedio</div>
+        <div style="${kpiValCss}">${leadAvg!==null?fmtDays(leadAvg):"—"}</div>
+        <div style="${kpiSubCss}">Días entre reserva y llegada</div>
+      </div>
+      <div style="${kpiCardCss}border-left:3px solid #be185d;">
+        <div style="${kpiLabelCss}">RevPAR anualizado</div>
+        <div style="${kpiValCss}">${fmtMoney(revpar*365)}</div>
+        <div style="${kpiSubCss}">Proyección por hab/año</div>
+      </div>
+    </div>`;
+
+  // Mix por fuente
+  const totalIngFuente=Math.max(1,porFuente.booking.ingreso+porFuente.directo.ingreso+porFuente.cuaderno.ingreso);
+  const fuenteRows=Object.keys(porFuente).map(f=>{
+    const d=porFuente[f];
+    const pct=(d.ingreso/totalIngFuente*100);
+    const colors={booking:"#0369a1",directo:"#D4A96A",cuaderno:"#7c3aed"};
+    const labels={booking:"Booking.com",directo:"Directo",cuaderno:"Cuaderno"};
+    return `<tr><td style="padding:8px 12px;">${labels[f]}</td><td style="padding:8px 12px;text-align:right;font-variant-numeric:tabular-nums;">${d.res}</td><td style="padding:8px 12px;text-align:right;font-variant-numeric:tabular-nums;">${d.noches}</td><td style="padding:8px 12px;text-align:right;font-variant-numeric:tabular-nums;font-weight:700;">${fmtMoney(d.ingreso)}</td><td style="padding:8px 12px;text-align:right;"><div style="background:#eee;border-radius:6px;height:8px;width:80px;display:inline-block;overflow:hidden;"><div style="background:${colors[f]};width:${pct}%;height:100%;"></div></div> <span style="font-size:10px;color:#888;">${pct.toFixed(0)}%</span></td></tr>`;
+  }).join("");
+
+  // Mix por tipo
+  const tipoRows=Object.keys(porTipo).sort((a,b)=>porTipo[b].ingreso-porTipo[a].ingreso).map(t=>{
+    const d=porTipo[t];
+    return `<tr><td style="padding:8px 12px;text-transform:capitalize;">${esc(t)}</td><td style="padding:8px 12px;text-align:right;font-variant-numeric:tabular-nums;">${d.res}</td><td style="padding:8px 12px;text-align:right;font-variant-numeric:tabular-nums;">${d.noches}</td><td style="padding:8px 12px;text-align:right;font-variant-numeric:tabular-nums;font-weight:700;">${fmtMoney(d.ingreso)}</td><td style="padding:8px 12px;text-align:right;font-variant-numeric:tabular-nums;color:#888;">${d.noches>0?fmtMoney(d.ingreso/d.noches):"—"}</td></tr>`;
+  }).join("");
+
+  const mixHtml=`
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:14px;margin-bottom:16px;">
+      <div style="background:var(--s);border:.5px solid var(--b);border-radius:var(--rl);overflow:hidden;">
+        <div style="padding:12px 16px;background:var(--s2);border-bottom:.5px solid var(--b);font-size:11px;font-weight:700;color:var(--t2);text-transform:uppercase;letter-spacing:.08em;">Mix por fuente</div>
+        <table style="width:100%;font-size:12px;border-collapse:collapse;">
+          <thead><tr style="background:var(--s2);color:var(--t3);font-size:10px;text-transform:uppercase;"><th style="padding:6px 12px;text-align:left;">Fuente</th><th style="padding:6px 12px;text-align:right;">Res</th><th style="padding:6px 12px;text-align:right;">Noches</th><th style="padding:6px 12px;text-align:right;">Ingreso</th><th style="padding:6px 12px;text-align:right;">%</th></tr></thead>
+          <tbody>${fuenteRows}</tbody>
+        </table>
+      </div>
+      <div style="background:var(--s);border:.5px solid var(--b);border-radius:var(--rl);overflow:hidden;">
+        <div style="padding:12px 16px;background:var(--s2);border-bottom:.5px solid var(--b);font-size:11px;font-weight:700;color:var(--t2);text-transform:uppercase;letter-spacing:.08em;">Mix por tipo de habitación</div>
+        <table style="width:100%;font-size:12px;border-collapse:collapse;">
+          <thead><tr style="background:var(--s2);color:var(--t3);font-size:10px;text-transform:uppercase;"><th style="padding:6px 12px;text-align:left;">Tipo</th><th style="padding:6px 12px;text-align:right;">Res</th><th style="padding:6px 12px;text-align:right;">Noches</th><th style="padding:6px 12px;text-align:right;">Ingreso</th><th style="padding:6px 12px;text-align:right;">ADR</th></tr></thead>
+          <tbody>${tipoRows||'<tr><td colspan="5" style="padding:20px;text-align:center;color:#888;">Sin datos</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>`;
+
+  // Glosario
+  const glosarioHtml=`
+    <div style="background:#FFF8E7;border-left:3px solid #D4A96A;padding:12px 16px;border-radius:6px;font-size:11px;color:#7A5A2E;">
+      <div style="font-weight:700;margin-bottom:6px;text-transform:uppercase;letter-spacing:.08em;font-size:10px;">Glosario hotelero</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:8px;">
+        <div><b>Ocupación:</b> % de habitaciones-noche vendidas sobre el total disponible.</div>
+        <div><b>ADR:</b> ingreso por habitaciones ÷ noches ocupadas. Mide qué tan caro vendes.</div>
+        <div><b>RevPAR:</b> ingreso ÷ habitaciones disponibles. La métrica reina del PMS — combina ocupación y precio.</div>
+        <div><b>ALOS:</b> noches totales ÷ reservas. A mayor ALOS, menor costo operativo por huésped.</div>
+        <div><b>Lead time:</b> días entre creación de reserva y check-in. Útil para forecasting.</div>
+      </div>
+    </div>`;
+
+  cont.innerHTML=selectorHtml+cardsHtml+mixHtml+glosarioHtml;
 }
 
 // ─── POR DÍA ────────────────────────────────────────────────
