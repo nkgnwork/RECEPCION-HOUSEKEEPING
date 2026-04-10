@@ -6,7 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Hotel Las Vicuñas — Recepción & Housekeeping v4.3</title>
 <!-- Favicon -->
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦙</text></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='18' fill='%233A2E1E'/><text x='50' y='66' font-family='Georgia,serif' font-size='52' font-weight='700' text-anchor='middle' fill='%23FAF6F0'>HV</text></svg>">
 <meta name="description" content="Sistema de recepción, disponibilidad y housekeeping — Hotel Las Vicuñas, Putre, Altiplano chileno.">
 <meta name="author" content="Hotel Las Vicuñas">
 <meta name="robots" content="noindex, nofollow">
@@ -1259,7 +1259,7 @@ async function resetearPINUsuario(userId, newPin){
 // ── HELPERS UI ────────────────────────────────────────────────
 function rolBadgeHtml(rol){
   var info = ROLES_INFO[rol] || { label:rol, ico:"?", color:"#888" };
-  return '<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:6px;background:'+info.color+'15;color:'+info.color+';font-size:10px;font-weight:700;">'+info.ico+' '+info.label+'</span>';
+  return '<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:6px;background:'+info.color+'15;color:'+info.color+';font-size:10px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;">'+info.label+'</span>';
 }
 
 // ── MODAL: GESTIÓN DE USUARIOS ────────────────────────────────
@@ -3211,7 +3211,7 @@ window.addEventListener('unhandledrejection',function(e){console.error('Promise:
     <div class="hk-hdr">
       <img class="hk-hdr-logo" src="" id="hkLogo" alt="Las Vicuñas">
       <div class="hk-hdr-info">
-        <div class="hk-nm" id="hkNombre">🧹 Housekeeping</div>
+        <div class="hk-nm" id="hkNombre">Housekeeping</div>
         <div id="hkFecha" class="hk-rol"></div>
       </div>
       <div style="display:flex;gap:8px;align-items:center;">
@@ -3221,11 +3221,11 @@ window.addEventListener('unhandledrejection',function(e){console.error('Promise:
     </div>
     <div class="hk-stats" id="hkStats"></div>
     <div class="hk-section" id="hkDirtySection">
-      <div class="hk-section-title">⚠️ Pendientes de aseo</div>
+      <div class="hk-section-title">Pendientes de aseo</div>
       <div class="hk-room-list" id="hkDirtyList"></div>
     </div>
     <div class="hk-section" id="hkCleanSection" style="margin-top:14px;">
-      <div class="hk-section-title">✅ Limpias hoy</div>
+      <div class="hk-section-title">Limpias hoy</div>
       <div class="hk-room-list" id="hkCleanList"></div>
     </div>
     <div class="hk-section" id="hkArrivalsSection" style="margin-top:14px;display:none;"></div>
@@ -3233,13 +3233,13 @@ window.addEventListener('unhandledrejection',function(e){console.error('Promise:
     <!-- ═══ PROACTIVIDAD ═══ -->
     <div class="hk-proact-score" id="hkProactScore" style="display:none;">
       <div><div class="ps-pts" id="hkProactPts">0</div><div class="ps-lbl">Puntos hoy</div></div>
-      <div class="ps-note">⚙️ Administración monitorea tareas declaradas y realizadas</div>
+      <div class="ps-note">Administración monitorea tareas declaradas y realizadas</div>
     </div>
     <div class="hk-proact-section" id="hkProactSection">
       <div class="hk-proact-header">
-        <div class="hk-section-title" style="margin-bottom:0;">⭐ Iniciativa del día</div>
+        <div class="hk-section-title" style="margin-bottom:0;">Iniciativa del día</div>
         <button class="hk-proact-fab" onclick="hkShowProactTasks()">
-          <span class="fab-ico">➕</span> Reportar iniciativa
+          Reportar iniciativa
         </button>
       </div>
       <div class="hk-proact-list" id="hkProactList"></div>
@@ -3286,7 +3286,7 @@ window.addEventListener('unhandledrejection',function(e){console.error('Promise:
 <div class="hk-disclaimer-overlay" id="hkProactPickerModal">
   <div class="hk-disclaimer-box" style="max-width:460px;">
     <div class="hk-disc-header" style="background:linear-gradient(135deg,#d97706,#f59e0b);padding:16px 20px;">
-      <div class="dh-titulo" style="font-size:15px;">⭐ Registrar actividad de iniciativa</div>
+      <div class="dh-titulo" style="font-size:15px;">Registrar actividad de iniciativa</div>
       <div class="dh-sub">Selecciona la tarea que realizaste por cuenta propia</div>
     </div>
     <div style="padding:14px 16px;max-height:55vh;overflow-y:auto;" id="hkProactPickerList"></div>
@@ -3526,22 +3526,22 @@ window.addEventListener('unhandledrejection',function(e){console.error('Promise:
       <div class="card">
         <div class="ct">Datos de la reserva</div>
         <div style="margin-bottom:10px;">
-          <div style="font-size:11px;color:var(--t2);font-weight:700;margin-bottom:5px;">🧾 Tipo de documento tributario</div>
+          <div style="font-size:11px;color:var(--t2);font-weight:700;margin-bottom:5px;">Tipo de documento tributario</div>
           <div class="doc-type-sel">
-            <button class="dt-btn boleta on" id="dtBoleta" onclick="setDocType('boleta')">🧾 Boleta</button>
-            <button class="dt-btn factura" id="dtFactura" onclick="setDocType('factura')">📄 Factura</button>
-            <button class="dt-btn exento" id="dtExento" onclick="setDocType('exento')">✈️ Exento IVA</button>
+            <button class="dt-btn boleta on" id="dtBoleta" onclick="setDocType('boleta')">Boleta</button>
+            <button class="dt-btn factura" id="dtFactura" onclick="setDocType('factura')">Factura</button>
+            <button class="dt-btn exento" id="dtExento" onclick="setDocType('exento')">Exento IVA</button>
           </div>
           <div id="ivaResumen" class="iva-resumen"></div>
           <div id="ndocWrap" style="display:none;"></div>
         </div>
         <div class="pg4" style="margin-bottom:8px;">
           <div>
-            <label style="font-size:11px;color:var(--t2);display:block;margin-bottom:3px;">📞 Teléfono de contacto</label>
+            <label style="font-size:11px;color:var(--t2);display:block;margin-bottom:3px;">Teléfono de contacto</label>
             <input id="telContacto" class="inp" placeholder="+56 9 XXXX XXXX" oninput="rTxt()" style="font-size:13px;">
           </div>
           <div>
-            <label style="font-size:11px;color:var(--t2);display:block;margin-bottom:3px;">🚗 Medio de llegada</label>
+            <label style="font-size:11px;color:var(--t2);display:block;margin-bottom:3px;">Medio de llegada</label>
             <select id="medioLlegada" class="inp" oninput="togglePatente()" style="font-size:13px;">
               <option value="">Seleccionar...</option>
               <option value="vehiculo">Vehículo particular</option>
@@ -3551,7 +3551,7 @@ window.addEventListener('unhandledrejection',function(e){console.error('Promise:
           </div>
         </div>
         <div id="patenteBox" style="display:none;margin-bottom:6px;">
-          <label style="font-size:11px;color:var(--t2);display:block;margin-bottom:3px;">🔤 Patente del vehículo</label>
+          <label style="font-size:11px;color:var(--t2);display:block;margin-bottom:3px;">Patente del vehículo</label>
           <input id="patente" class="inp" placeholder="Ej: ABCD12" oninput="rTxt()" style="font-size:13px;text-transform:uppercase;max-width:180px;">
         </div>
       </div>
@@ -3561,7 +3561,7 @@ window.addEventListener('unhandledrejection',function(e){console.error('Promise:
       <div class="ct" style="margin-bottom:9px;">Mensaje generado</div>
       <div class="cx" id="cotTxt"></div>
       <button class="cpbtn" id="cpBtn" onclick="copiar()">Copiar texto</button>
-      <button class="gbtn" id="gBtn" onclick="guardar()" style="display:none;">💾 Guardar en registro y disponibilidad</button>
+      <button class="gbtn" id="gBtn" onclick="guardar()" style="display:none;">Guardar en registro y disponibilidad</button>
     </div>
   </div>
   </div>
@@ -3579,7 +3579,7 @@ window.addEventListener('unhandledrejection',function(e){console.error('Promise:
         <button onclick="navD(1)">▶</button>
         <button onclick="navD(0)" style="background:#fdf0e6;color:var(--mar);border-color:var(--cam);">Hoy</button>
         <button id="btnGantt" onclick="toggleGantt()" style="background:#f5f0e8;border-color:var(--b2);font-size:11px;" title="Vista Gantt">▦ Gantt</button>
-        <button class="papelera-btn" onclick="showPapelera()" id="btnPapeleraDisp" style="display:none;">♻️ <span id="papeleraBadgeDisp"></span>Papelera</button>
+        <button class="papelera-btn" onclick="showPapelera()" id="btnPapeleraDisp" style="display:none;"><span id="papeleraBadgeDisp"></span> Papelera</button>
       </div>
       <div class="bk-box" id="bkBoxAdmin">
         <div class="bk-top">
@@ -3600,10 +3600,10 @@ window.addEventListener('unhandledrejection',function(e){console.error('Promise:
           </label>
           <input type="file" id="bkFoto" class="bk-inp" accept="image/*" onchange="importarFotoCuaderno(this)">
           <button class="btn-cuaderno-import" onclick="importarCuaderno(false)" title="Importa las reservas del cuaderno físico (cargadas desde fotos)">
-            📔 Sincronizar cuaderno
+            Sincronizar cuaderno
           </button>
           <span class="bk-status" id="bkStatus">Importa .ics, Excel/CSV de Booking, o foto del cuaderno</span>
-          <button class="bk-clear" id="bkClear" onclick="limpiarBooking()" style="display:none;">🗑 Limpiar</button>
+          <button class="bk-clear" id="bkClear" onclick="limpiarBooking()" style="display:none;">Limpiar</button>
         </div>
         <div class="bk-warn" id="bkWarn"></div>
         <details id="bkDetails" style="margin-top:8px;"><summary id="bkSummary" style="cursor:pointer;font-size:12px;font-weight:700;color:#003580;padding:4px 0;list-style:none;">▶ Ver reservas importadas</summary><div class="bk-list" id="bkList" style="margin-top:6px;">
@@ -3612,7 +3612,7 @@ window.addEventListener('unhandledrejection',function(e){console.error('Promise:
         </div></details>
       </div>
       <div class="aseo-panel" id="aseoPanel" style="display:none;">
-        <h4>🧹 Habitaciones pendientes de aseo</h4>
+        <h4>Habitaciones pendientes de aseo</h4>
         <div class="aseo-grid" id="aseoGrid"></div>
       </div>
       <div class="leyenda">
@@ -3621,11 +3621,11 @@ window.addEventListener('unhandledrejection',function(e){console.error('Promise:
         <span class="ley-i"><span class="ley-d" style="background:#ede9fe;border:.5px solid #7c3aed;"></span> Triple</span>
         <span class="ley-i"><span class="ley-d" style="background:#fce7f3;border:.5px solid #db2777;"></span> Matrimonial</span>
         <span class="ley-i"><span class="ley-d" style="background:#e0f2fe;border:.5px solid #0284c7;"></span> Flexible</span>
-        <span class="ley-i"><span class="ley-d" style="background:#dc2626;"></span> 🧹 Aseo</span>
+        <span class="ley-i"><span class="ley-d" style="background:#dc2626;"></span> Aseo</span>
         <span class="ley-i"><span class="ley-d" style="background:#003580;"></span> Booking.com</span>
       </div>
       <div style="font-size:10px;color:var(--t2);margin-bottom:8px;line-height:1.7;">
-        <span style="font-weight:700;">🎨 Color por habitación:</span>
+        <span style="font-weight:700;">Color por habitación:</span>
         <span id="leyendaRooms"></span>
       </div>
       <div class="tabla-disp" id="tablaDisp"></div>
@@ -3638,18 +3638,18 @@ window.addEventListener('unhandledrejection',function(e){console.error('Promise:
   <div id="pg-reg" class="pg">
   <div class="wrap">
     <div class="rh">
-      <h2>📊 Registro pasajeros — INE</h2>
+      <h2>Registro pasajeros — INE</h2>
       <div style="display:flex;gap:7px;flex-wrap:wrap;">
-        <button class="bexp" onclick="expExcel()">⬇️ Exportar Excel</button>
-        <button class="bexp" onclick="exportarBackup()" style="background:#4361ee;color:#fff;" title="Descarga un JSON completo">💾 Backup</button>
+        <button class="bexp" onclick="expExcel()">Exportar Excel</button>
+        <button class="bexp" onclick="exportarBackup()" style="background:#4361ee;color:#fff;" title="Descarga un JSON completo">Backup</button>
         <label class="bexp" style="background:#6a4c93;color:#fff;cursor:pointer;" title="Restaurar desde backup JSON">
-          📥 Restaurar
+          Restaurar
           <input type="file" accept=".json" style="display:none;" onchange="importarBackup(this)">
         </label>
-        <button class="bexp" onclick="syncBookingINE()" style="background:#003580;color:#fff;" title="Importar reservas de Booking al registro INE">📥 Booking → INE</button>
-        <button class="bexp" onclick="syncCuadernoINE()" style="background:#5c3d1e;color:#fff;">📔 Completar cuaderno→INE</button>
-        <button class="bdng" onclick="limpiar()">🗑️ Limpiar todo</button>
-        <button class="papelera-btn" onclick="showPapelera()" id="btnPapeleraReg">♻️ <span id="papeleraBadgeReg"></span>Papelera</button>
+        <button class="bexp" onclick="syncBookingINE()" style="background:#003580;color:#fff;" title="Importar reservas de Booking al registro INE">Booking → INE</button>
+        <button class="bexp" onclick="syncCuadernoINE()" style="background:#5c3d1e;color:#fff;">Completar cuaderno → INE</button>
+        <button class="bdng" onclick="limpiar()">Limpiar todo</button>
+        <button class="papelera-btn" onclick="showPapelera()" id="btnPapeleraReg"><span id="papeleraBadgeReg"></span> Papelera</button>
       </div>
       <div id="ineAlertaFaltantes" style="display:none;margin-top:8px;background:#fff3cd;border:1px solid #ffc107;border-radius:8px;padding:10px 14px;font-size:12px;"></div>
       <div id="ineAlertaCuaderno" style="display:none;margin-top:8px;background:#fdf3e3;border:1px solid #c8956c;border-radius:8px;padding:10px 14px;font-size:12px;"></div>
@@ -3686,7 +3686,7 @@ window.addEventListener('unhandledrejection',function(e){console.error('Promise:
         <button class="fin-tab" id="ftMes" onclick="setFinTab('mes')">Por mes</button>
         <button class="fin-tab" id="ftAnio" onclick="setFinTab('anio')">Por año</button>
       </div>
-      <button class="papelera-btn" onclick="showPapelera()" id="btnPapeleraFin">♻️ <span id="papeleraBadgeFin"></span>Papelera</button>
+      <button class="papelera-btn" onclick="showPapelera()" id="btnPapeleraFin"><span id="papeleraBadgeFin"></span> Papelera</button>
     </div>
     <div class="fin-selector" id="finSelector"></div>
     <div id="finResumenTab"></div>
@@ -4192,10 +4192,10 @@ function hkLoginConfirm(){
     esHousekeeper = true;
     document.getElementById("loginScreen").style.display = "none";
     document.getElementById("hkApp").style.display = "block";
-    document.title = "🧹 " + hkUsuarioActual + " — Housekeeping";
+    document.title = hkUsuarioActual + " — Housekeeping";
     const loginLogo = document.querySelector(".ls-logo");
     document.getElementById("hkLogo").src = loginLogo ? loginLogo.src : "";
-    document.getElementById("hkNombre").textContent = "🧹 " + hkUsuarioActual;
+    document.getElementById("hkNombre").textContent = hkUsuarioActual;
     const now = new Date();
     document.getElementById("hkFecha").textContent = now.toLocaleDateString("es-CL",{weekday:"long",day:"numeric",month:"long"});
     renderHK();
@@ -4272,8 +4272,8 @@ function renderHK(){
     </div>`;
   } else {
     const dirtyTitle=dirtySection.querySelector(".hk-section-title");
-    if(dirtyTitle) dirtyTitle.textContent=`⚠️ Pendientes de aseo (${sucias.length})`;
-    else dirtySection.innerHTML=`<div class="hk-section-title">⚠️ Pendientes de aseo (${sucias.length})</div><div class="hk-room-list" id="hkDirtyList"></div>`;
+    if(dirtyTitle) dirtyTitle.textContent=`Pendientes de aseo (${sucias.length})`;
+    else dirtySection.innerHTML=`<div class="hk-section-title">Pendientes de aseo (${sucias.length})</div><div class="hk-room-list" id="hkDirtyList"></div>`;
     const dirtyList=document.getElementById("hkDirtyList");
     if(dirtyList){
       dirtyList.innerHTML = sucias.map(rn=>{
@@ -4300,7 +4300,7 @@ function renderHK(){
     cleanSection.style.display = "none";
   } else {
     cleanSection.style.display = "block";
-    cleanSection.innerHTML = `<div class="hk-section-title">✅ Limpias hoy (${limpiasHoy.length})</div>
+    cleanSection.innerHTML = `<div class="hk-section-title">Limpias hoy (${limpiasHoy.length})</div>
     <div class="hk-room-list">${limpiasHoy.map(rn=>{
       const tipo = ROOMS[rn]?ROOMS[rn].tipo:"flex";
       return `<div class="hk-room-card is-clean">
@@ -4322,7 +4322,7 @@ function renderHK(){
     const depDiv = document.createElement("div");
     depDiv.className = "hk-section hk-dep-section";
     depDiv.style.marginTop = "14px";
-    depDiv.innerHTML = `<div class="hk-section-title">🚪 Salidas hoy (${checkoutHoy.length})</div>
+    depDiv.innerHTML = `<div class="hk-section-title">Salidas hoy (${checkoutHoy.length})</div>
       <div class="hk-room-list">${checkoutHoy.map(r=>{
         const tipo = ROOMS[r.roomNum]?ROOMS[r.roomNum].tipo:"flex";
         const yaLimpia = limpiasHoy.includes(r.roomNum);
@@ -4344,7 +4344,7 @@ function renderHK(){
     arrivalsSection.style.display = "none";
   } else {
     arrivalsSection.style.display = "block";
-    arrivalsSection.innerHTML = `<div class="hk-section-title">📅 Por llegar hoy (${arrivalsData.length})</div>
+    arrivalsSection.innerHTML = `<div class="hk-section-title">Por llegar hoy (${arrivalsData.length})</div>
     <div class="hk-room-list">${arrivalsData.map(r=>renderHKArrivalCard(r,HOY)).join("")}</div>`;
   }
 }
@@ -4746,11 +4746,11 @@ function rDash(){
       </div>
     </div>`).join("")+
   '<div style="grid-column:1/-1;display:flex;gap:8px;justify-content:flex-end;margin-top:-4px;flex-wrap:wrap;">'+
-  '<button onclick="printCheckinSheet()" style="background:var(--gold,#D4A96A);color:#fff;border:none;padding:8px 16px;border-radius:10px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;">📋 Ficha Check-in</button>'+
-  '<button onclick="printReporteDiario()" style="background:var(--el-2,#f5f0e8);border:1px solid var(--b2,#e8ddd0);color:var(--t,#3A2E1E);padding:8px 16px;border-radius:10px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;">🖨 Reporte diario</button></div>';
+  '<button onclick="printCheckinSheet()" style="background:var(--gold,#D4A96A);color:#fff;border:none;padding:8px 16px;border-radius:10px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;">Ficha Check-in</button>'+
+  '<button onclick="printReporteDiario()" style="background:var(--el-2,#f5f0e8);border:1px solid var(--b2,#e8ddd0);color:var(--t,#3A2E1E);padding:8px 16px;border-radius:10px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;">Reporte diario</button></div>';
   // Tablas arrivals / departures
   const _e=s=>String(s||"").replace(/</g,"&lt;");
-  let arrHtml='<div class="dash-tbl"><div class="dash-tbl-title">📥 Llegadas hoy</div>';
+  let arrHtml='<div class="dash-tbl"><div class="dash-tbl-title">Llegadas hoy</div>';
   if(checkins.length){
     arrHtml+='<table><thead><tr><th>Hab</th><th>Huésped</th><th>Noches</th><th>Fuente</th><th style="width:70px;"></th></tr></thead><tbody>';
     checkins.forEach(r=>{
@@ -4760,7 +4760,7 @@ function rDash(){
     arrHtml+='</tbody></table>';
   } else arrHtml+='<div class="dash-tbl-empty">Sin llegadas programadas</div>';
   arrHtml+='</div>';
-  let depHtml='<div class="dash-tbl"><div class="dash-tbl-title">📤 Salidas hoy</div>';
+  let depHtml='<div class="dash-tbl"><div class="dash-tbl-title">Salidas hoy</div>';
   if(checkouts.length){
     depHtml+='<table><thead><tr><th>Hab</th><th>Huésped</th><th>Noches</th></tr></thead><tbody>';
     checkouts.forEach(r=>{
