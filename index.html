@@ -7883,6 +7883,122 @@ let sbConnected = false;
 let sbChannel = null;
 const FB_CFG_KEY = "hv_fb_config"; // reutilizamos la misma clave localStorage
 
+// ── Optimistic Locking: timestamps y callbacks a nivel de módulo ──
+const _sbTimestamps = {};  // key → last known updated_at (ISO string, efímero por sesión)
+
+// Callbacks de UI que se ejecutan cuando una key cambia (usado por realtime y por merge)
+const _realtimeCallbacks = {
+  "hv_sucias":      ()=>{ try{rDisp();}catch(e){} try{if(document.getElementById("hkApp").style.display!=="none") renderHK();}catch(e){} },
+  "hv_limpias_hoy": ()=>{ try{rDisp();}catch(e){} try{if(document.getElementById("hkApp").style.display!=="none") renderHK();}catch(e){} },
+  "hv_reservas":    ()=>{ try{rDisp();}catch(e){} try{rTabla();}catch(e){} try{rFin();}catch(e){} try{actualizarAlertaCheckin();}catch(e){} try{if(document.getElementById("pg-cot").classList.contains("on")&&tabC===1)rTodo();}catch(e){} },
+  "hv_booking":     ()=>{ try{rDisp();}catch(e){} try{restaurarBKList();}catch(e){} try{actualizarAlertaCheckin();}catch(e){} try{if(document.getElementById("pg-cot").classList.contains("on")&&tabC===1)rTodo();}catch(e){} },
+  "hv_registros":   ()=>{ try{rTabla();}catch(e){} },
+  "hv_papelera":    ()=>{ try{updatePapeleraBadges();}catch(e){} },
+  "hv_historial_limpieza": ()=>{},
+  "hv_proact_log":  ()=>{ try{ if(document.getElementById("hkApp").style.display!=="none") renderHKProact(); }catch(e){} },
+  "hv_proact_disclaimer": ()=>{},
+};
+
+// ── Merge: funciones de fusión por tipo de key ───────────────────
+
+// Arrays de objetos con campo id: unión por id, local es autoritativo para sus items
+function _mergeById(local, server){
+  if(!Array.isArray(local)) return local;
+  if(!Array.isArray(server)) return local;
+  var localIds = {};
+  local.forEach(function(item){ if(item && item.id) localIds[String(item.id)] = true; });
+  var result = local.slice(); // copia de local
+  server.forEach(function(item){
+    if(item && item.id && !localIds[String(item.id)]){
+      result.push(item); // item nuevo del server que local no conoce
+    }
+  });
+  return result;
+}
+
+// hv_sucias: array de room numbers — local es autoritativo para remociones, server agrega nuevas
+function _mergeSucias(local, server){
+  if(!Array.isArray(local)) return local;
+  if(!Array.isArray(server)) return local;
+  var localSet = {};
+  local.forEach(function(r){ localSet[r] = true; });
+  var result = local.slice();
+  server.forEach(function(r){
+    if(!localSet[r]) result.push(r); // server tiene room que local no — agregamos
+  });
+  return result;
+}
+
+// hv_limpias_hoy: {fecha, rooms[]} — unión de rooms si misma fecha
+function _mergeLimpiasHoy(local, server){
+  if(!server || !server.rooms) return local;
+  if(!local || !local.rooms) return server;
+  if(local.fecha !== server.fecha) return local; // fechas distintas: local gana (server es stale)
+  var roomSet = {};
+  (local.rooms||[]).forEach(function(r){ roomSet[r]=true; });
+  var merged = (local.rooms||[]).slice();
+  (server.rooms||[]).forEach(function(r){ if(!roomSet[r]){ merged.push(r); roomSet[r]=true; } });
+  return {fecha: local.fecha, rooms: merged};
+}
+
+// Logs append-only sin id: dedupe por composite key
+function _mergeAppendLog(local, server, keyFn){
+  if(!Array.isArray(local)) return local;
+  if(!Array.isArray(server)) return local;
+  var seen = {};
+  local.forEach(function(e){ seen[keyFn(e)] = true; });
+  var result = local.slice();
+  server.forEach(function(e){
+    var k = keyFn(e);
+    if(!seen[k]){ result.push(e); seen[k] = true; }
+  });
+  return result;
+}
+
+// HK supplies: OR-merge (si alguno dice true, queda true)
+function _mergeSupplies(local, server){
+  if(!server || typeof server !== "object") return local;
+  if(!local || typeof local !== "object") return server;
+  var result = {};
+  var keys = {};
+  Object.keys(local).forEach(function(k){ keys[k]=true; });
+  Object.keys(server).forEach(function(k){ keys[k]=true; });
+  Object.keys(keys).forEach(function(k){ result[k] = !!(local[k]) || !!(server[k]); });
+  return result;
+}
+
+// Router principal de merge
+function _sbMerge(key, localValue, serverValue){
+  if(["hv_reservas","hv_registros","hv_booking","hv_papelera","hv_users","hv_audit"].indexOf(key) >= 0){
+    return _mergeById(localValue, serverValue);
+  }
+  if(key === "hv_sucias") return _mergeSucias(localValue, serverValue);
+  if(key === "hv_limpias_hoy") return _mergeLimpiasHoy(localValue, serverValue);
+  if(key === "hv_historial_limpieza"){
+    return _mergeAppendLog(localValue, serverValue, function(e){ return (e.roomNum||"")+ "|"+(e.fecha||"")+"|"+(e.hora||""); });
+  }
+  if(key === "hv_proact_log"){
+    return _mergeAppendLog(localValue, serverValue, function(e){ return (e.tareaId||"")+"|"+(e.fecha||"")+"|"+(e.hora||"")+"|"+(e.usuario||""); });
+  }
+  if(key.indexOf("hv_hk_sup_") === 0) return _mergeSupplies(localValue, serverValue);
+  return localValue; // default: local wins
+}
+
+// Forzar recarga de una key desde Supabase (fallback si retry falla)
+async function _sbForceReload(key){
+  if(!sbClient || !sbConnected) return;
+  try{
+    var resp = await sbClient.from("hotel_data").select("value, updated_at").eq("key", key).single();
+    if(resp.error || !resp.data) return;
+    _sbTimestamps[key] = resp.data.updated_at;
+    safeSave(key, resp.data.value);
+    if(_realtimeCallbacks[key]) _realtimeCallbacks[key]();
+    else if(key.indexOf("hv_hk_sup_")===0){
+      try{ if(document.getElementById("hkApp").style.display!=="none") renderHK(); }catch(e){}
+    }
+  }catch(e){ console.warn("Force reload failed:", key, e); }
+}
+
 // ── Config ──────────────────────────────────────────────────────
 function getFbConfig(){
   try{ return JSON.parse(localStorage.getItem(FB_CFG_KEY)||"null"); }
@@ -7954,71 +8070,153 @@ function initSupabase(cfg, fromModal){
   }
 }
 
-// ── Write ─────────────────────────────────────────────────────────
+// ── Write con optimistic locking ─────────────────────────────────
 async function sbSet(key, value){
   if(!sbClient || !sbConnected) return;
+  var newTs = new Date().toISOString();
+  var knownTs = _sbTimestamps[key];
+
   try{
-    await sbClient.from("hotel_data").upsert(
-      {key, value, updated_at: new Date().toISOString()},
-      {onConflict:"key"}
-    );
-  } catch(e){ console.warn("Supabase write error:", key, e); }
-}
+    // Si tenemos timestamp conocido → UPDATE condicional (optimistic lock)
+    if(knownTs){
+      var resp = await sbClient.from("hotel_data")
+        .update({value: value, updated_at: newTs})
+        .eq("key", key)
+        .eq("updated_at", knownTs)
+        .select("updated_at");
 
-// ── Push local data on first connect ─────────────────────────────
-function pushLocalToSupabase(){
-  const keys = ["hv_reservas","hv_registros","hv_booking","hv_sucias","hv_limpias_hoy","hv_papelera","hv_historial_limpieza","hv_proact_log","hv_proact_disclaimer"];
-  keys.forEach(k=>{
-    const raw = localStorage.getItem(k);
-    if(!raw) return;
-    try{
-      const d = JSON.parse(raw);
-      const empty = Array.isArray(d)?d.length===0:Object.keys(d||{}).length===0;
-      if(!empty) sbSet(k, d);
-    }catch(e){}
-  });
-  // Also push today's HK supply checklist keys
-  const hoy=hoyISO();
-  for(let i=0;i<localStorage.length;i++){
-    const k=localStorage.key(i);
-    if(k&&k.startsWith("hv_hk_sup_"+hoy)){
-      try{ sbSet(k, JSON.parse(localStorage.getItem(k))); }catch(e){}
+      if(!resp.error && resp.data && resp.data.length > 0){
+        // Éxito: nadie escribió entre medio
+        _sbTimestamps[key] = resp.data[0].updated_at;
+        return;
+      }
+
+      // 0 filas afectadas = conflicto. Otro dispositivo escribió primero.
+      // Retry con merge hasta 3 veces
+      for(var attempt = 1; attempt <= 3; attempt++){
+        var serverResp = await sbClient.from("hotel_data")
+          .select("value, updated_at").eq("key", key).single();
+        if(serverResp.error || !serverResp.data) break;
+
+        // Merge local + server
+        var merged = _sbMerge(key, value, serverResp.data.value);
+        _sbTimestamps[key] = serverResp.data.updated_at;
+
+        // Reintentar UPDATE con el timestamp recién leído
+        var retryTs = new Date().toISOString();
+        var retryResp = await sbClient.from("hotel_data")
+          .update({value: merged, updated_at: retryTs})
+          .eq("key", key)
+          .eq("updated_at", serverResp.data.updated_at)
+          .select("updated_at");
+
+        if(!retryResp.error && retryResp.data && retryResp.data.length > 0){
+          // Éxito tras merge
+          _sbTimestamps[key] = retryResp.data[0].updated_at;
+          safeSave(key, merged); // actualizar local con datos mergeados
+          if(_realtimeCallbacks[key]) _realtimeCallbacks[key]();
+          return;
+        }
+        // Otro conflicto, reintentamos...
+      }
+
+      // 3 reintentos fallidos
+      toast("Otro usuario modificó los datos. Recargando…","warn",4000);
+      _sbForceReload(key);
+      return;
     }
-  }
+
+    // Sin timestamp conocido → UPSERT incondicional (primera escritura o estado desconocido)
+    var upsertResp = await sbClient.from("hotel_data")
+      .upsert({key: key, value: value, updated_at: newTs}, {onConflict:"key"})
+      .select("updated_at");
+    if(upsertResp.data && upsertResp.data.length > 0){
+      _sbTimestamps[key] = upsertResp.data[0].updated_at;
+    }
+  } catch(e){ console.warn("sbSet error:", key, e); }
 }
 
-// ── Realtime listeners ────────────────────────────────────────────
+// ── Push local con merge al conectar ─────────────────────────────
+async function pushLocalToSupabase(){
+  if(!sbClient || !sbConnected) return;
+
+  var keys = ["hv_reservas","hv_registros","hv_booking","hv_sucias","hv_limpias_hoy",
+              "hv_papelera","hv_historial_limpieza","hv_proact_log","hv_proact_disclaimer",
+              "hv_users","hv_audit"];
+
+  // Agregar supply keys del día actual
+  var hoy = hoyISO();
+  for(var i=0; i<localStorage.length; i++){
+    var lk = localStorage.key(i);
+    if(lk && lk.indexOf("hv_hk_sup_"+hoy) === 0) keys.push(lk);
+  }
+
+  try{
+    // Leer todo el estado del servidor en una sola query
+    var serverResp = await sbClient.from("hotel_data")
+      .select("key, value, updated_at").in("key", keys);
+
+    if(serverResp.error){ console.warn("pushLocal read error:", serverResp.error); return; }
+
+    var serverMap = {};
+    (serverResp.data||[]).forEach(function(row){
+      serverMap[row.key] = row;
+      _sbTimestamps[row.key] = row.updated_at;
+    });
+
+    for(var ki=0; ki<keys.length; ki++){
+      var k = keys[ki];
+      var raw = localStorage.getItem(k);
+      if(!raw) continue;
+      var localData;
+      try{ localData = JSON.parse(raw); }catch(e){ continue; }
+      var empty = Array.isArray(localData) ? localData.length===0 : Object.keys(localData||{}).length===0;
+      if(empty && !serverMap[k]) continue;
+
+      var finalData = localData;
+      if(serverMap[k] && !empty){
+        // Server ya tiene datos: merge
+        finalData = _sbMerge(k, localData, serverMap[k].value);
+        safeSave(k, finalData);
+      } else if(serverMap[k] && empty){
+        // Local vacío pero server tiene datos: usar server
+        finalData = serverMap[k].value;
+        safeSave(k, finalData);
+        continue; // no reescribir al server
+      }
+
+      // Escribir datos (mergeados o solo-local) al server
+      var pushTs = new Date().toISOString();
+      var uResp = await sbClient.from("hotel_data")
+        .upsert({key: k, value: finalData, updated_at: pushTs}, {onConflict:"key"})
+        .select("updated_at");
+      if(uResp.data && uResp.data[0]) _sbTimestamps[k] = uResp.data[0].updated_at;
+    }
+  }catch(e){ console.warn("pushLocal error:", e); }
+}
+
+// ── Realtime listeners (usa _realtimeCallbacks de módulo) ────────
 let _listenersSetup = false;
 function setupRealtimeListeners(){
   if(_listenersSetup) return;
   _listenersSetup = true;
   if(sbChannel){ try{ sbClient.removeChannel(sbChannel); }catch(e){} sbChannel=null; }
 
-  const callbacks = {
-    "hv_sucias":      ()=>{ try{rDisp();}catch(e){} try{if(document.getElementById("hkApp").style.display!=="none") renderHK();}catch(e){} },
-    "hv_limpias_hoy": ()=>{ try{rDisp();}catch(e){} try{if(document.getElementById("hkApp").style.display!=="none") renderHK();}catch(e){} },
-    "hv_reservas":    ()=>{ try{rDisp();}catch(e){} try{rTabla();}catch(e){} try{rFin();}catch(e){} try{actualizarAlertaCheckin();}catch(e){} try{if(document.getElementById("pg-cot").classList.contains("on")&&tabC===1)rTodo();}catch(e){} },
-    "hv_booking":     ()=>{ try{rDisp();}catch(e){} try{restaurarBKList();}catch(e){} try{actualizarAlertaCheckin();}catch(e){} try{if(document.getElementById("pg-cot").classList.contains("on")&&tabC===1)rTodo();}catch(e){} },
-    "hv_registros":   ()=>{ try{rTabla();}catch(e){} },
-    "hv_papelera":    ()=>{ try{updatePapeleraBadges();}catch(e){} },
-    "hv_historial_limpieza": ()=>{ /* no UI refresh needed */ },
-    "hv_proact_log": ()=>{ try{ if(document.getElementById("hkApp").style.display!=="none") renderHKProact(); }catch(e){} },
-    "hv_proact_disclaimer": ()=>{ /* no UI refresh needed */ },
-  };
-
   sbChannel = sbClient.channel("hotel_sync")
     .on("postgres_changes",
       {event:"*", schema:"public", table:"hotel_data"},
       payload=>{
         const eventType = payload.eventType;
-        if(eventType === "DELETE") return; // ignore deletes (vaciarPapelera etc)
-        const {key, value} = payload.new || {};
+        if(eventType === "DELETE") return;
+        const {key, value, updated_at} = payload.new || {};
         if(!key || value===undefined) return;
+        // Capturar timestamp para optimistic locking
+        if(updated_at) _sbTimestamps[key] = updated_at;
         const cur = localStorage.getItem(key);
         const inc = typeof value==="string"?value:JSON.stringify(value);
         if(cur !== inc){
           safeSave(key, value);
-          if(callbacks[key]) callbacks[key]();
+          if(_realtimeCallbacks[key]) _realtimeCallbacks[key]();
           else if(key.startsWith("hv_hk_sup_")){
             try{ if(document.getElementById("hkApp").style.display!=="none") renderHK(); }catch(e){}
           }
