@@ -686,7 +686,9 @@ function _doImportarBackup(file, input){
     } catch(err){
       toast("Error al leer el backup: " + err.message, "err");
     }
-    input.value = "";
+    // FIX: input puede ser null si _doImportarBackup se llama sin elemento <input>
+    // (ej. desde tests o llamadas programáticas). Guardia para evitar TypeError.
+    if(input) input.value = "";
   };
   reader.readAsText(file, "utf-8");
 }
@@ -1353,7 +1355,7 @@ function _uiCrearUsuario(){
             crearUsuario({ nombre:nombre, username:username.toLowerCase().trim(), rol:rol.toLowerCase().trim(), password:password, pin:pin }).then(function(res){
               if(res.ok){ toast("Usuario creado: "+res.user.username,"ok"); _renderUsuariosModal(); }
               else { toast("Error: "+res.error,"err"); }
-            });
+            }).catch(function(e){ toast("Error inesperado: "+(e&&e.message||e),"err"); });
           }, "password");
         }, "password");
       });
@@ -1365,14 +1367,17 @@ function _uiDesactivar(uid){
     desactivarUsuario(uid).then(function(res){
       if(res.ok){ toast("Usuario desactivado","ok"); _renderUsuariosModal(); }
       else { toast("Error: "+res.error,"err"); }
-    });
+    }).catch(function(e){ toast("Error inesperado: "+(e&&e.message||e),"err"); });
   }, "Desactivar", true);
 }
 function _uiReactivar(uid){
-  reactivarUsuario(uid).then(function(res){
-    if(res.ok){ toast("Usuario reactivado","ok"); _renderUsuariosModal(); }
-    else { toast("Error: "+res.error,"err"); }
-  });
+  // FIX: pedir confirmación antes de reactivar (acción sensible)
+  showConfirm("Reactivar usuario","¿Reactivar este usuario? Volverá a poder iniciar sesión.", function(){
+    reactivarUsuario(uid).then(function(res){
+      if(res.ok){ toast("Usuario reactivado","ok"); _renderUsuariosModal(); }
+      else { toast("Error: "+res.error,"err"); }
+    }).catch(function(e){ toast("Error inesperado: "+(e&&e.message||e),"err"); });
+  }, "Reactivar");
 }
 function _uiResetPwd(uid){
   showInput("Nueva contraseña (mín 4 caracteres):", "", function(pwd){
@@ -1380,7 +1385,7 @@ function _uiResetPwd(uid){
     resetearPasswordUsuario(uid, pwd).then(function(res){
       if(res.ok){ toast("Contraseña reseteada","ok"); }
       else { toast("Error: "+res.error,"err"); }
-    });
+    }).catch(function(e){ toast("Error inesperado: "+(e&&e.message||e),"err"); });
   }, "password");
 }
 function _uiResetPin(uid){
@@ -1389,7 +1394,7 @@ function _uiResetPin(uid){
     resetearPINUsuario(uid, pin).then(function(res){
       if(res.ok){ toast("PIN reseteado","ok"); _renderUsuariosModal(); }
       else { toast("Error: "+res.error,"err"); }
-    });
+    }).catch(function(e){ toast("Error inesperado: "+(e&&e.message||e),"err"); });
   }, "password");
 }
 
@@ -4612,11 +4617,13 @@ const ROOM_STATES = {
   out_of_order: {label:"Fuera de servicio",labelHK:"Bloqueada",    color:"#6b7280", bg:"#f3f4f6", icon:"🚫"}
 };
 // Transiciones válidas: estado_actual → [estados posibles]
+// FIX: cleaning→dirty permitido para cancelar limpieza (interrupción, hueso aún ocupado).
+// FIX: inspected→dirty permitido si el supervisor encuentra problema tras inspeccionar.
 const VALID_TRANSITIONS = {
   dirty:        ["cleaning"],
-  cleaning:     ["clean"],
-  clean:        ["inspected","ready"],
-  inspected:    ["ready"],
+  cleaning:     ["clean","dirty"],
+  clean:        ["inspected","ready","dirty"],
+  inspected:    ["ready","dirty"],
   ready:        ["dirty"],
   out_of_order: ["dirty"]
 };
@@ -5428,7 +5435,9 @@ function toggleHKSupply(date, roomNum, supply){
   const key = `hv_hk_sup_${date}_${roomNum}`;
   const s = getHKSupplies(date, roomNum);
   s[supply] = !s[supply];
-  localStorage.setItem(key, JSON.stringify(s));
+  // FIX: usar safeSave en lugar de setItem directo. Si localStorage falla
+  // (modo incógnito, cuota llena), safeSave maneja el error sin romper el flow.
+  safeSave(key, s);
   sbSet(key, s); // Bug 2 fix: sync to Supabase
   renderHK();
 }
@@ -5844,7 +5853,11 @@ function asignarHab(tipoIdx,fi,fo,excludeRooms){
 // ══════════════════════════════
 const _pageTitles={dash:"Dashboard",cot:"Cotización",disp:"Disponibilidad",reg:"Registro INE",fin:"Finanzas",print:"Impresiones"};
 function showPg(id,btn){
-  if(!esAdmin && id!=="disp")return;
+  // FIX: avisar al usuario en lugar de fallar silenciosamente cuando no es admin
+  if(!esAdmin && id!=="disp"){
+    if(typeof toast === "function") toast("Acceso restringido — inicia sesión como admin", "warn", 2500);
+    return;
+  }
   // Actualizar páginas
   document.querySelectorAll(".pg").forEach(p=>p.classList.remove("on"));
   document.getElementById("pg-"+id).classList.add("on");
