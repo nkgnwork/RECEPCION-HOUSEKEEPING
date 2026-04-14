@@ -8904,18 +8904,250 @@ function limpiar(){
     true
   );
 }
+// ════════════════════════════════════════════════════════════════
+// EXPORTAR REGISTRO INE A EXCEL (formato oficial Hotel Las Vicuñas)
+// ────────────────────────────────────────────────────────────────
+// Genera un .xlsx con las 22 columnas exactas del template oficial:
+// A: Fecha Ingreso · B: Fecha de Salida · C: Noches · D: Nombres
+// E: Red · F: Nacionalidad · G: Origen
+// H-L: Single | Doble | Matri | Fam | Triple (conteo por tipo)
+// M: Metodo Pago · N: N°Doc · O: Factura · P: Total Booking
+// Q: -3% (comisión) · R: Total Tarjeta · S: (vacía) · T: Total
+// U: ¿INE? · V: N° Documento
+// ════════════════════════════════════════════════════════════════
+
+// Mapea la nacionalidad libre (texto) al formato canónico del template
+function _ineNacionalidadCanonica(raw){
+  const s = String(raw||"").toLowerCase().trim();
+  if(!s || s==="—") return "";
+  if(/chile|chilen|^cl$/.test(s)) return "Chilenos";
+  if(/franc|france|^fr$/.test(s)) return "Frances";
+  if(/ingl|engl|brit|kingdom|england|reino unido|\buk\b|^gb$/.test(s)) return "Inglaterra";
+  if(/alem|german|deutsch|^de$/.test(s)) return "Alemanes";
+  if(/suec|swed|^se$/.test(s)) return "Suecos";
+  if(/ital|^it$/.test(s)) return "Italiano";
+  if(/españ|espan|spain|^es$/.test(s)) return "España";
+  if(/argent|^ar$/.test(s)) return "Argentinos";
+  if(/brasil|brazil|^br$/.test(s)) return "Brasileños";
+  if(/peru|^pe$/.test(s)) return "Peruanos";
+  if(/boliv|^bo$/.test(s)) return "Bolivianos";
+  if(/uru|^uy$/.test(s)) return "Uruguayos";
+  if(/parag|^py$/.test(s)) return "Paraguayos";
+  if(/colomb|^co$/.test(s)) return "Colombianos";
+  if(/ecuad|^ec$/.test(s)) return "Ecuatorianos";
+  if(/venez|^ve$/.test(s)) return "Venezolanos";
+  if(/mexic|mejic|^mx$/.test(s)) return "Mexicanos";
+  if(/usa|estados unidos|united states|americ|^us$/.test(s)) return "Estadounidenses";
+  if(/canad|^ca$/.test(s)) return "Canadienses";
+  if(/japon|japan|^jp$/.test(s)) return "Japoneses";
+  if(/chin|^cn$/.test(s)) return "Chinos";
+  if(/holand|nether|^nl$/.test(s)) return "Holandeses";
+  if(/belg|^be$/.test(s)) return "Belgas";
+  if(/suiz|swiss|switz|^ch$/.test(s)) return "Suizos";
+  if(/portug|^pt$/.test(s)) return "Portugueses";
+  // Si no coincide con nada conocido, devolver el original capitalizado
+  return raw.charAt(0).toUpperCase() + raw.slice(1);
+}
+
+// Mapea la "Red" (canal de llegada) al formato del template
+function _ineRedCanonica(medio, fuente){
+  const m = String(medio||"").toLowerCase();
+  const f = String(fuente||"").toLowerCase();
+  if(m.includes("booking") || f.includes("booking")) return "Booking";
+  if(m.includes("whats") || m.includes("wsp")) return "Whatsapp";
+  if(m.includes("airbnb")) return "Airbnb";
+  if(m.includes("expedia")) return "Expedia";
+  if(m.includes("despegar") || m.includes("decolar")) return "Despegar";
+  if(m.includes("directo") || m.includes("direct")) return "Directo";
+  if(m.includes("cuaderno")) return "Directo";
+  return "Directo";
+}
+
+// Mapea la habitacion (string "Hab. 102" o tipo) al índice de columna H-L
+// Retorna un array [single, doble, matri, fam, triple] con 1 en el tipo correcto
+function _ineCountsTipo(tipoKey){
+  const counts = ["", "", "", "", ""]; // single, doble, matri, fam, triple
+  if(!tipoKey) return counts;
+  const k = String(tipoKey).toLowerCase();
+  if(k==="single") counts[0] = 1;
+  else if(k==="doble") counts[1] = 1;
+  else if(k==="matrimonial") counts[2] = 1;
+  else if(k==="familiar") counts[3] = 1;
+  else if(k==="triple") counts[4] = 1;
+  return counts;
+}
+
+// Infiere tipoKey a partir del número de habitación (cuando no hay reserva ligada)
+function _ineTipoDesdeRoomNum(roomNum){
+  const rn = parseInt(roomNum,10);
+  if(!rn) return null;
+  if([102,103,202].includes(rn)) return "familiar";
+  if([118,119,120,121].includes(rn)) return "triple";
+  if(rn===228) return "matrimonial";
+  // Resto de habitaciones: doble por defecto
+  return "doble";
+}
+
 function expExcel(){
-  const reg=getReg();
-  if(!reg.length){toast("No hay registros para exportar.","warn");return;}
-  const cols=["N° Pasajeros","N° Noches","Nacionalidad","País de Residencia","Ciudad de Residencia","Nombre","Documento","Tipo Doc.","Check-in","Check-out","Habitación","Teléfono","Medio Llegada","Patente"];
-  const filas=reg.map((r)=>[r.totalPax||1,r.noches,r.nacionalidad,r.residencia,r.ciudad||"—",r.nombre,r.doc,r.tipodoc,fmtFC(r.checkin),fmtFC(r.checkout),r.habitacion,r.telefono||"—",r.medio||"—",r.patente||"—"]);
-  const csv=[cols,...filas].map(row=>row.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(",")).join("\n");
-  const blob=new Blob(["\uFEFF"+csv],{type:"text/csv;charset=utf-8;"});
-  const url=URL.createObjectURL(blob),a=document.createElement("a");
-  const mes=new Date().toLocaleDateString("es-CL",{year:"numeric",month:"long"}).replace(/ /g,"_");
-  a.href=url;a.download=`Registro_INE_HLV_${mes}.csv`;
-  document.body.appendChild(a);a.click();
-  setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 100);
+  const reg = getReg();
+  if(!reg.length){ toast("No hay registros para exportar.","warn"); return; }
+  if(typeof XLSX === "undefined"){ toast("SheetJS no está cargado","err"); return; }
+
+  // Construir índice de reservas por id para enriquecer cada registro
+  const sysRes = getReservas();
+  const bkRes  = getBookingReservas();
+  const reservasById = {};
+  sysRes.forEach(function(r){ reservasById[r.id] = Object.assign({}, r, {_origen:"sistema"}); });
+  bkRes.forEach(function(r){ reservasById[r.id] = Object.assign({}, r, {_origen:"booking"}); });
+
+  // Agrupar registros INE por bookingId (una fila por reserva, no por pasajero)
+  const grupos = {};
+  reg.forEach(function(r){
+    const key = r.bookingId || ("solo_"+r.id);
+    if(!grupos[key]){
+      grupos[key] = { titular: r, pasajeros: [r], reserva: reservasById[r.bookingId] || null };
+    } else {
+      grupos[key].pasajeros.push(r);
+    }
+  });
+
+  // Headers oficiales (22 columnas A-V)
+  const headers = [
+    "Fecha Ingreso", "Fecha de Salida", "Noches", "Nombres",
+    "Red", "Nacionalidad", "Origen",
+    "Single", "Doble", "Matri", "Fam", "Triple",
+    "Metodo Pago", "N°Doc", "Factura", "Total Booking",
+    "-3%", "Total Tarjeta", "", "Total",
+    "¿INE?", "N° Documento"
+  ];
+
+  const rows = [headers];
+
+  // Ordenar grupos por fecha de check-in
+  const claves = Object.keys(grupos).sort(function(a,b){
+    const ca = grupos[a].titular.checkin || "";
+    const cb = grupos[b].titular.checkin || "";
+    return ca.localeCompare(cb);
+  });
+
+  claves.forEach(function(k, idx){
+    const g = grupos[k];
+    const t = g.titular;
+    const res = g.reserva;
+
+    // Determinar tipo de habitación: primero desde reserva, luego inferido por roomNum
+    let tipoKey = null;
+    if(res && res.tipo) tipoKey = res.tipo;
+    else if(res && res.tipoIdx != null && HABS[res.tipoIdx]) tipoKey = HABS[res.tipoIdx].key;
+    else {
+      // Extraer roomNum del string "Hab. 102"
+      const m = String(t.habitacion||"").match(/(\d+)/);
+      if(m) tipoKey = _ineTipoDesdeRoomNum(parseInt(m[1],10));
+    }
+    const counts = _ineCountsTipo(tipoKey);
+
+    // Total de la reserva (CLP)
+    let totalCLP = "";
+    if(res){
+      if(res.precioReal && res.precioReal > 0) totalCLP = res.precioReal;
+      else if(res.precio){
+        const p = parseFloat(String(res.precio).replace(/\./g,"").replace(/,/g,".").replace(/[^0-9.]/g,""));
+        if(!isNaN(p) && p>0) totalCLP = p;
+      }
+      // Fallback: precio base * noches
+      if(!totalCLP && tipoKey){
+        const habDef = HABS.find(function(h){ return h.key===tipoKey; });
+        const noches = parseInt(t.noches||1,10);
+        if(habDef) totalCLP = habDef.precio * noches;
+      }
+    }
+
+    // Red (canal)
+    const red = _ineRedCanonica(t.medio, res ? res.fuente : "");
+
+    // Nacionalidad canónica
+    const nacCanon = _ineNacionalidadCanonica(t.nacionalidad);
+
+    // Origen (ciudad) — solo se llena para chilenos en el template oficial
+    const origen = (nacCanon === "Chilenos" && t.ciudad && t.ciudad !== "—") ? t.ciudad : "";
+
+    // Concatenar nombres de todos los pasajeros del grupo
+    const nombresAll = g.pasajeros.map(function(p){ return p.nombre; }).filter(function(n){ return n && n!=="—"; }).join(" / ");
+
+    // N° Doc (titular)
+    const numDoc = (t.doc && t.doc !== "—") ? t.doc : "";
+
+    // Fila Excel (índice numérico de fila para fórmulas)
+    const excelRow = idx + 2; // header en fila 1, datos desde fila 2
+
+    // Fórmulas para Q (comisión 3% si Booking) y R (total + comisión)
+    const formulaComision = (red==="Booking" && totalCLP) ? { f: "P"+excelRow+"*0.03" } : "";
+    const formulaTotalTarjeta = (red==="Booking" && totalCLP) ? { f: "P"+excelRow+"+Q"+excelRow } : "";
+    const formulaTotal = totalCLP ? { f: (red==="Booking" ? "R"+excelRow : "P"+excelRow) } : "";
+
+    rows.push([
+      t.checkin ? new Date(t.checkin+"T12:00:00") : "",  // A
+      t.checkout ? new Date(t.checkout+"T12:00:00") : "", // B
+      t.noches || "",                                     // C
+      nombresAll || t.nombre || "",                       // D
+      red,                                                // E
+      nacCanon,                                           // F
+      origen,                                             // G
+      counts[0], counts[1], counts[2], counts[3], counts[4], // H I J K L
+      "",                                                 // M Metodo Pago (sin dato)
+      numDoc,                                             // N N°Doc
+      "",                                                 // O Factura
+      totalCLP,                                           // P Total Booking
+      formulaComision,                                    // Q -3%
+      formulaTotalTarjeta,                                // R Total Tarjeta
+      "",                                                 // S vacía
+      formulaTotal,                                       // T Total
+      "Si",                                               // U ¿INE?
+      numDoc                                              // V N° Documento
+    ]);
+  });
+
+  // Generar la hoja con tipos correctos (fechas reales)
+  const ws = XLSX.utils.aoa_to_sheet(rows, { cellDates: true });
+
+  // Anchos de columna aproximados (en caracteres)
+  ws["!cols"] = [
+    { wch: 13 }, { wch: 14 }, { wch: 7 }, { wch: 28 }, // A B C D
+    { wch: 11 }, { wch: 14 }, { wch: 10 },             // E F G
+    { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, { wch: 8 }, // H I J K L
+    { wch: 14 }, { wch: 14 }, { wch: 10 }, { wch: 14 },        // M N O P
+    { wch: 10 }, { wch: 14 }, { wch: 4 }, { wch: 14 },         // Q R S T
+    { wch: 7 }, { wch: 16 }                                    // U V
+  ];
+
+  // Aplicar formato de fecha a columnas A y B
+  const range = XLSX.utils.decode_range(ws["!ref"]);
+  for(let R = 1; R <= range.e.r; R++){
+    ["A","B"].forEach(function(col){
+      const cellRef = col + (R+1);
+      const cell = ws[cellRef];
+      if(cell && cell.v instanceof Date){
+        cell.t = "d";
+        cell.z = "dd-mm-yyyy";
+      }
+    });
+    // Formato CLP a columnas P, Q, R, T
+    ["P","Q","R","T"].forEach(function(col){
+      const cellRef = col + (R+1);
+      const cell = ws[cellRef];
+      if(cell && (typeof cell.v === "number" || cell.f)){
+        cell.z = '"$"#,##0';
+      }
+    });
+  }
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Hoja 1");
+
+  const mes = new Date().toLocaleDateString("es-CL",{year:"numeric",month:"long"}).replace(/ /g,"_");
+  XLSX.writeFile(wb, "Registro_INE_HLV_"+mes+".xlsx");
+
+  toast("✓ "+(rows.length-1)+" reservas exportadas a Excel","ok",3500);
 }
 
 // ══════════════════════════════
