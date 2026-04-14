@@ -445,7 +445,7 @@ function abrirModalPaxFaltantes(reservaId){
   document.getElementById("modalPaxFaltantes").style.display = "block";
 }
 
-function guardarPaxFaltantes(){
+function guardarPaxFaltantes(imprimir){
   if(!_mpfReservaActual) return;
   var r = _mpfReservaActual;
   var paxTotal = r.pax || 1;
@@ -463,6 +463,16 @@ function guardarPaxFaltantes(){
   if(!alertaEl.querySelectorAll("[data-reserva-id]").length) alertaEl.style.display = "none";
   rTabla();
   toast("\u2713 "+pasajeros.length+" pasajero"+(pasajeros.length!==1?"s":"")+" registrados en INE","ok");
+  // FIX bug doble llenado: si el usuario pidió imprimir, disparar la ficha
+  // con los datos que acaba de guardar (ya quedaron en hv_registros con bookingId = r.id).
+  if(imprimir){
+    setTimeout(function(){
+      try{
+        if(paxTotal >= 2) printFichaGrupal(r.id);
+        else printCheckinSheet(r.id);
+      }catch(e){ console.warn("[print post-guardar]", e); }
+    }, 250);
+  }
 }
 // ── Sync reservas directas del cuaderno → INE ─────────────────
 function syncCuadernoINE(){
@@ -1731,7 +1741,7 @@ function abrirDatosDirecta(reservaId){
   document.getElementById("modalDatosDirecta").style.display="flex";
 }
 
-function guardarDatosDirecta(){
+function guardarDatosDirecta(imprimir){
   if(!_cuadDatosFaltantesId) return;
   const reservas = getReservas();
   const idx = reservas.findIndex(r=>r.id===_cuadDatosFaltantesId);
@@ -1764,6 +1774,16 @@ function guardarDatosDirecta(){
   rTabla();
   try{ rDisp(); }catch(e){}
   toast(`✓ Datos de ${r.nombre} guardados en INE`,"ok");
+  // FIX bug doble llenado: si el usuario pidió imprimir, disparar la ficha
+  // con los datos que acaba de guardar (ya quedaron en hv_registros con bookingId = r.id).
+  if(imprimir){
+    setTimeout(function(){
+      try{
+        if(paxTotal >= 2) printFichaGrupal(r.id);
+        else printCheckinSheet(r.id);
+      }catch(e){ console.warn("[print post-guardar]", e); }
+    }, 250);
+  }
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -6087,8 +6107,9 @@ function rDash(){
   ];
   document.getElementById("dashGrid").innerHTML=kpis.map(function(k){return '<div class="dash-card '+k.cls+'"><div class="dash-card-ico">'+k.ico+'</div><div class="dash-card-body"><div class="dash-card-label">'+k.label+'</div><div class="dash-card-valor">'+k.valor+'</div><div class="dash-card-sub">'+k.sub+'</div></div></div>';}).join("")+
   '<div style="grid-column:1/-1;display:flex;gap:8px;justify-content:flex-end;margin-top:-4px;flex-wrap:wrap;">'+
-  '<button onclick="printCheckinSheet()" style="background:var(--gold,#D4A96A);color:#fff;border:none;padding:8px 16px;border-radius:10px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;">Ficha Check-in</button>'+
-  '<button onclick="printFichaGrupal()" style="background:var(--el-2,#f5f0e8);border:1.5px solid var(--gold,#D4A96A);color:var(--t,#3A2E1E);padding:8px 16px;border-radius:10px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;">Ficha Grupal</button>'+
+  // FIX bug doble llenado: abrir menú de impresión (con lista de reservas) en lugar
+  // de ficha en blanco. Así el usuario elige la reserva y los datos se auto-rellenan.
+  '<button onclick="showPrintMenu()" style="background:var(--gold,#D4A96A);color:#fff;border:none;padding:8px 16px;border-radius:10px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;">🖨 Imprimir fichas</button>'+
   '<button onclick="printReporteDiario()" style="background:var(--el-2,#f5f0e8);border:1px solid var(--b2,#e8ddd0);color:var(--t,#3A2E1E);padding:8px 16px;border-radius:10px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;">Reporte diario</button></div>';
 
   // === Render: Ocupación 7 días (barras) ===
@@ -8793,7 +8814,7 @@ function delReg(id){
   const quien = entry ? entry.nombre : "este pasajero";
   showConfirm(
     "Eliminar registro INE",
-    "¿Eliminar el registro de " + quien + "? Esto también lo quitará del calendario de disponibilidad.\n\nPodrás deshacer con Ctrl+Z.",
+    "¿Eliminar el registro de " + quien + "? Esto también lo quitará del calendario de disponibilidad.\n\nSe moverá a la papelera y podrás restaurarlo desde ahí, o usar Ctrl+Z.",
     function(){
       // FIX: snapshot previo para Ctrl+Z (captura ficha + reservas + papelera)
       const _undoSnap = _undoSnapshot(["hv_registros","hv_reservas","hv_papelera"]);
@@ -8801,6 +8822,21 @@ function delReg(id){
       const updatedReg = reg.filter(r=>String(r.id)!==String(id));
       safeSave("hv_registros", updatedReg);
       sbSet("hv_registros", updatedReg);
+      // FIX bug papelera INE: el registro eliminado también va a la papelera
+      // para que se pueda restaurar desde ahí (no solo con Ctrl+Z).
+      if(entry){
+        const papeleraINE = getPapelera();
+        const copiaIne = JSON.parse(JSON.stringify(entry));
+        copiaIne._origen = "registro_ine"; // discriminador para render / restauración
+        copiaIne.deletedAt = new Date().toISOString();
+        // Campos que usa renderPapeleraBody: roomNum (extraído de habitacion), noches, nombre, checkin, checkout
+        if(!copiaIne.roomNum && copiaIne.habitacion){
+          var _m = String(copiaIne.habitacion).match(/\d+/);
+          if(_m) copiaIne.roomNum = parseInt(_m[0],10);
+        }
+        papeleraINE.unshift(copiaIne);
+        savePapelera(papeleraINE);
+      }
 
       // 2. Remove matching reserva from calendar ONLY if no other INE records remain for it
       if(entry){
@@ -9852,10 +9888,29 @@ function renderPapeleraBody(){
   const docLbl={"boleta":"Boleta","factura":"Factura","exento":"Exento IVA"};
   body.innerHTML = items.map((r,idx)=>{
     const bgColor = roomColor(r.roomNum).bg || "#5c3d1e";
-    const doc = r.docType||"boleta";
-    const nDoc = r.nDocumento||r.numDoc ? ` · N°${r.nDocumento||r.numDoc}` : "";
     const deletedDate = r.deletedAt||r.eliminadoEn;
     const fechaEl = deletedDate ? `<div style="color:#dc2626;font-size:10px;">🗑 Eliminada: ${fmtFC(deletedDate.slice(0,10))}</div>` : "";
+    // FIX bug papelera INE: renderizado diferenciado para registros INE (_origen==="registro_ine")
+    if(r._origen === "registro_ine"){
+      const docIne = r.doc && r.doc!=="—" ? ` · ${esc(r.tipodoc||"Doc")}: ${esc(r.doc)}` : "";
+      const nac = r.nacionalidad && r.nacionalidad!=="—" ? ` · 🌍 ${esc(r.nacionalidad)}` : "";
+      return `<div style="display:flex;align-items:center;gap:10px;padding:10px;border:1px solid #c7d2fe;border-radius:10px;margin-bottom:8px;background:#f5f7ff;">
+        <div style="width:36px;height:36px;border-radius:8px;background:${bgColor};display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:900;color:#fff;flex-shrink:0;">${r.roomNum||"?"}</div>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:13px;font-weight:700;color:#2a1f0f;">${esc(r.nombre||"Pasajero")}<span style="background:#e0e7ff;color:#3730a3;border-radius:4px;padding:1px 5px;font-size:9px;font-weight:700;margin-left:4px;">📋 Ficha INE</span></div>
+          <div style="font-size:11px;color:#4b3c28;">📅 ${fmtFC(r.checkin)} → ${fmtFC(r.checkout)} · ${r.noches||"?"} noche${(r.noches||1)!==1?"s":""}</div>
+          <div style="font-size:11px;color:#6b5740;">${esc(r.habitacion||"Hab. ?")}${docIne}${nac}</div>
+          ${fechaEl}
+        </div>
+        <div style="display:flex;flex-direction:column;gap:5px;flex-shrink:0;">
+          <button onclick="restaurarReserva(${idx})" style="padding:5px 10px;background:#0f6e56;color:#fff;border:none;border-radius:7px;cursor:pointer;font-size:11px;font-weight:700;">↩ Restaurar</button>
+          <button onclick="eliminarDefinitivo(${idx})" style="padding:5px 10px;background:transparent;color:#dc2626;border:1px solid #fca5a5;border-radius:7px;cursor:pointer;font-size:11px;font-weight:600;">✕ Borrar</button>
+        </div>
+      </div>`;
+    }
+    // Render reservas (comportamiento original)
+    const doc = r.docType||"boleta";
+    const nDoc = r.nDocumento||r.numDoc ? ` · N°${r.nDocumento||r.numDoc}` : "";
     const fuenteTag = r.fuente==="booking"
       ? `<span style="background:#e0f0ff;color:#003580;border-radius:4px;padding:1px 5px;font-size:9px;font-weight:700;margin-left:4px;">Booking</span>`
       : r.id&&r.id.startsWith("CUAD_")
@@ -9882,13 +9937,24 @@ function restaurarReserva(idx){
   const r = items[idx];
   if(!r) return;
   // FIX: snapshot previo para Ctrl+Z (por si restauró por error)
-  const _undoSnap = _undoSnapshot(["hv_papelera","hv_reservas","hv_booking"]);
+  const _undoSnap = _undoSnapshot(["hv_papelera","hv_reservas","hv_booking","hv_registros"]);
   items.splice(idx,1);
   savePapelera(items);
+  // FIX bug papelera INE: distinguir si es una ficha INE o una reserva
+  const esRegistroINE = r._origen === "registro_ine";
   // Bug 17 fix: read esBooking BEFORE deleting flags, then clean all tombstone props
   const esBooking = r.fuente==="booking" || r._origenBooking;
+  const _nombreRestaurado = r.nombre || (esRegistroINE?"pasajero":"reserva");
   delete r.deletedAt; delete r.eliminadoEn; delete r._origen; delete r._origenBooking;
-  if(esBooking){
+  if(esRegistroINE){
+    // Restaurar a hv_registros (ficha INE)
+    const regs = getReg();
+    if(!regs.find(x=>String(x.id)===String(r.id))){
+      regs.push(r);
+      safeSave("hv_registros", regs);
+      sbSet("hv_registros", regs);
+    }
+  } else if(esBooking){
     const bkRes = getBookingReservas();
     if(!bkRes.find(x=>x.id===r.id)){
       bkRes.push(r);
@@ -9906,8 +9972,8 @@ function restaurarReserva(idx){
   try{ rDisp(); }catch(e){}
   try{ rTabla(); }catch(e){}
   try{ rFin(); }catch(e){}
-  pushUndo("Restaurar " + (r.nombre||"reserva"), _undoSnap);
-  toast("Reserva restaurada ✓ · Ctrl+Z para deshacer","ok",3200);
+  pushUndo("Restaurar " + _nombreRestaurado, _undoSnap);
+  toast((esRegistroINE?"Ficha INE":"Reserva")+" restaurada ✓ · Ctrl+Z para deshacer","ok",3200);
 }
 
 function eliminarDefinitivo(idx){
@@ -11196,9 +11262,10 @@ ALTER PUBLICATION supabase_realtime ADD TABLE hotel_data;</code></div>
     <h3 id="mpfTitulo" style="margin:0 0 4px;color:#003580;font-size:16px;"></h3>
     <p id="mpfSubtitulo" style="font-size:12px;color:#666;margin:0 0 16px;"></p>
     <div id="mpfPasajeros"></div>
-    <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end;">
+    <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end;flex-wrap:wrap;">
       <button onclick="document.getElementById('modalPaxFaltantes').style.display='none'" style="padding:8px 16px;border:1px solid #ccc;background:#fff;border-radius:8px;cursor:pointer;font-size:13px;">Cancelar</button>
-      <button onclick="guardarPaxFaltantes()" style="padding:8px 16px;background:#003580;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;">Guardar en INE</button>
+      <button onclick="guardarPaxFaltantes()" style="padding:8px 16px;background:#fff;color:#003580;border:1px solid #003580;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;">💾 Solo guardar</button>
+      <button onclick="guardarPaxFaltantes(true)" style="padding:8px 16px;background:#003580;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700;">💾 Guardar e imprimir ficha</button>
     </div>
   </div>
 </div>
@@ -11213,9 +11280,10 @@ ALTER PUBLICATION supabase_realtime ADD TABLE hotel_data;</code></div>
       <button onclick="document.getElementById('modalDatosDirecta').style.display='none'" style="background:rgba(255,255,255,.2);border:none;color:#fff;border-radius:8px;padding:6px 10px;cursor:pointer;font-size:14px;">✕</button>
     </div>
     <div id="cdPasajeros" style="overflow-y:auto;flex:1;padding:14px;"></div>
-    <div style="padding:12px 16px;border-top:1px solid #e5e7eb;display:flex;gap:8px;justify-content:flex-end;background:#f9fafb;flex-shrink:0;">
+    <div style="padding:12px 16px;border-top:1px solid #e5e7eb;display:flex;gap:8px;justify-content:flex-end;background:#f9fafb;flex-shrink:0;flex-wrap:wrap;">
       <button onclick="document.getElementById('modalDatosDirecta').style.display='none'" style="padding:8px 16px;background:#fff;color:#374151;border:1px solid #d1d5db;border-radius:8px;cursor:pointer;font-size:13px;font-family:inherit;">Cancelar</button>
-      <button onclick="guardarDatosDirecta()" style="padding:8px 18px;background:#003580;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;">💾 Guardar en INE</button>
+      <button onclick="guardarDatosDirecta()" style="padding:8px 16px;background:#fff;color:#003580;border:1px solid #003580;border-radius:8px;cursor:pointer;font-size:13px;font-weight:600;font-family:inherit;">💾 Solo guardar</button>
+      <button onclick="guardarDatosDirecta(true)" style="padding:8px 18px;background:#003580;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;">💾 Guardar e imprimir ficha</button>
     </div>
   </div>
 </div>
