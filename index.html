@@ -112,7 +112,100 @@ function formatRUT(rut){
   const fmt = cuerpo.replace(/\B(?=(\d{3})+(?!\d))/g,".");
   return fmt+"-"+dv;
 }
+// Normaliza un RUT a su forma sin puntos ni guión, con DV en mayúscula.
+// Sirve como clave canónica para el cache hv_empresas.
+function rutKey(rut){
+  if(!rut) return "";
+  return String(rut).replace(/\./g,"").replace(/-/g,"").replace(/\s+/g,"").toUpperCase();
+}
 // ── FIN VALIDACIÓN RUT ───────────────────────────────────────
+
+// ══════════════════════════════════════════════════════════════
+// CACHE LOCAL DE EMPRESAS (para facturas)
+// ──────────────────────────────────────────────────────────────
+// Estructura: { "76632059-7": {rut, razonSocial, direccion, comuna,
+//                              giro, contacto, telefono, email,
+//                              updatedAt} }
+// El cache se guarda en localStorage como hv_empresas y permite
+// auto-completar los datos de la empresa al volver a facturarle.
+// ══════════════════════════════════════════════════════════════
+function getEmpresas(){
+  try{ return JSON.parse(localStorage.getItem("hv_empresas")||"{}"); }
+  catch(e){ return {}; }
+}
+function saveEmpresa(empresa){
+  if(!empresa || !empresa.rut) return;
+  var key = rutKey(empresa.rut);
+  if(!key) return;
+  var todas = getEmpresas();
+  // Conservar campos previos si los nuevos vienen vacíos
+  var prev = todas[key] || {};
+  todas[key] = {
+    rut: formatRUT(empresa.rut) || empresa.rut,
+    razonSocial: empresa.razonSocial || prev.razonSocial || "",
+    direccion:   empresa.direccion   || prev.direccion   || "",
+    comuna:      empresa.comuna      || prev.comuna      || "",
+    giro:        empresa.giro        || prev.giro        || "",
+    contacto:    empresa.contacto    || prev.contacto    || "",
+    telefono:    empresa.telefono    || prev.telefono    || "",
+    email:       empresa.email       || prev.email       || "",
+    updatedAt:   new Date().toISOString()
+  };
+  try{ localStorage.setItem("hv_empresas", JSON.stringify(todas)); }catch(e){}
+  try{ if(typeof sbSet === "function") sbSet("hv_empresas", todas); }catch(e){}
+}
+function findEmpresa(rut){
+  if(!rut) return null;
+  var key = rutKey(rut);
+  var todas = getEmpresas();
+  return todas[key] || null;
+}
+function deleteEmpresa(rut){
+  if(!rut) return;
+  var key = rutKey(rut);
+  var todas = getEmpresas();
+  delete todas[key];
+  try{ localStorage.setItem("hv_empresas", JSON.stringify(todas)); }catch(e){}
+  try{ if(typeof sbSet === "function") sbSet("hv_empresas", todas); }catch(e){}
+}
+// Lookup opcional de RUT vía API externa configurable por el usuario.
+// Por defecto está deshabilitado: la mayoría de APIs gratuitas chilenas
+// están caídas y exigen API key. Se puede configurar manualmente vía
+// localStorage.hlv_rut_api_url (debe responder con JSON con campos
+// razonSocial, direccion, etc.). Si no hay URL configurada, el usuario
+// llena los datos a mano y quedan cacheados para próximas facturas.
+async function lookupEmpresaPorRUT(rut){
+  var key = rutKey(rut);
+  if(!key) return null;
+  // 1) Buscar en cache local primero
+  var cached = findEmpresa(rut);
+  if(cached) return cached;
+  // 2) Intentar API externa si el usuario la configuró
+  var apiUrl = "";
+  try{ apiUrl = localStorage.getItem("hlv_rut_api_url") || ""; }catch(e){}
+  if(!apiUrl) return null;
+  try{
+    var url = apiUrl.replace("{rut}", encodeURIComponent(key));
+    var resp = await fetch(url, { method:"GET", mode:"cors" });
+    if(!resp.ok) return null;
+    var data = await resp.json();
+    // Mapeo flexible — la mayoría de APIs usan estos campos
+    return {
+      rut: rut,
+      razonSocial: data.razonSocial || data.razon_social || data.nombre || "",
+      direccion:   data.direccion   || data.address      || "",
+      comuna:      data.comuna      || data.commune      || "",
+      giro:        data.giro        || data.actividad    || data.actividad_economica || "",
+      contacto:    data.contacto    || data.representante|| "",
+      telefono:    data.telefono    || data.phone        || "",
+      email:       data.email       || ""
+    };
+  }catch(e){
+    console.warn("[lookupEmpresaPorRUT]", e);
+    return null;
+  }
+}
+// ── FIN CACHE EMPRESAS ───────────────────────────────────────
 
 // ══ IMPORTAR EXCEL/CSV ════════════════════════════════════════
 function importarCSV(input){
@@ -1712,6 +1805,23 @@ function abrirDatosDirecta(reservaId){
     </div>`;
   }
   // Campos extra de la reserva
+  // Pre-cargar datos de empresa si existen en la reserva
+  var _ef = (r.empresaFactura && typeof r.empresaFactura === "object") ? r.empresaFactura : {};
+  var _efRut       = _ef.rut       || "";
+  var _efRazon     = _ef.razonSocial || "";
+  var _efDir       = _ef.direccion || "";
+  var _efComuna    = _ef.comuna    || "";
+  var _efGiro      = _ef.giro      || "";
+  var _efContacto  = _ef.contacto  || "";
+  var _metPago     = r.metodoPago  || "";
+  var _nDoc        = r.nDocumento  || "";
+  // Datalist con RUTs ya cacheados para auto-completar
+  var _empresasCache = (typeof getEmpresas === "function") ? getEmpresas() : {};
+  var _empOpts = Object.values(_empresasCache).map(function(e){
+    return "<option value=\""+(e.rut||"")+"\">"+(e.razonSocial||"")+"</option>";
+  }).join("");
+  var _doc = r.docType || "boleta";
+  var _showFactura = (_doc === "factura") ? "block" : "none";
   html += `<div style="border-top:1px solid #eee;margin-top:8px;padding-top:8px;">
     <div style="font-size:11px;font-weight:700;color:#5c3d1e;margin-bottom:6px;">Datos de la reserva</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
@@ -1722,14 +1832,63 @@ function abrirDatosDirecta(reservaId){
         <input class="cd-inp" id="cdPrecio" type="number" placeholder="0" value="${r.precio||""}">
       </div>
       <div><label style="font-size:10px;color:#6b5740;">Tipo documento fiscal</label>
-        <select class="cd-inp" id="cdDocType">
-          <option value="boleta"${(r.docType||"boleta")==="boleta"?" selected":""}>Boleta</option>
-          <option value="factura"${r.docType==="factura"?" selected":""}>Factura</option>
-          <option value="exento"${r.docType==="exento"?" selected":""}>Exento (turista)</option>
+        <select class="cd-inp" id="cdDocType" onchange="cdToggleEmpresa()">
+          <option value="boleta"${_doc==="boleta"?" selected":""}>Boleta</option>
+          <option value="factura"${_doc==="factura"?" selected":""}>Factura</option>
+          <option value="exento"${_doc==="exento"?" selected":""}>Exento (turista)</option>
+        </select>
+      </div>
+      <div><label style="font-size:10px;color:#6b5740;">N° documento fiscal</label>
+        <input class="cd-inp" id="cdNDoc" placeholder="Ej: 001234" value="${_nDoc}">
+      </div>
+      <div><label style="font-size:10px;color:#6b5740;">Método de pago</label>
+        <select class="cd-inp" id="cdMetodoPago">
+          <option value=""${_metPago===""?" selected":""}>—</option>
+          <option value="Efectivo"${_metPago==="Efectivo"?" selected":""}>Efectivo</option>
+          <option value="Debito"${_metPago==="Debito"?" selected":""}>Débito</option>
+          <option value="Credito"${_metPago==="Credito"?" selected":""}>Crédito</option>
+          <option value="Transferencia"${_metPago==="Transferencia"?" selected":""}>Transferencia</option>
+          <option value="Booking"${_metPago==="Booking"?" selected":""}>Cobro Booking</option>
         </select>
       </div>
       <div><label style="font-size:10px;color:#6b5740;">Patente vehículo</label>
         <input class="cd-inp" id="cdPatente" placeholder="AB-1234" value="${(pr && pr.patente) || r.patente || ""}">
+      </div>
+    </div>
+    <div id="cdEmpresaWrap" style="display:${_showFactura};margin-top:10px;padding:10px;background:#fef9f0;border:1px solid #f0d9a8;border-radius:8px;">
+      <div style="font-size:11px;font-weight:700;color:#92400e;margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;gap:6px;">
+        <span>📄 Empresa a facturar</span>
+        <span style="font-size:9px;font-weight:500;color:#a07a3a;">Distinta del pasajero — datos para la factura</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+        <div style="grid-column:span 2;">
+          <label style="font-size:10px;color:#6b5740;">RUT empresa</label>
+          <div style="display:flex;gap:6px;">
+            <input class="cd-inp" id="cdEmpresaRUT" list="cdEmpresasList" placeholder="76.123.456-7" value="${_efRut}" onblur="cdLookupEmpresa()" style="flex:1;">
+            <datalist id="cdEmpresasList">${_empOpts}</datalist>
+            <button type="button" onclick="cdLookupEmpresa()" style="padding:6px 10px;background:#d4a96a;color:#3A2E1E;border:none;border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;font-family:inherit;white-space:nowrap;">Buscar</button>
+          </div>
+        </div>
+        <div style="grid-column:span 2;">
+          <label style="font-size:10px;color:#6b5740;">Razón social</label>
+          <input class="cd-inp" id="cdEmpresaRazon" placeholder="Hotel ABC SpA" value="${_efRazon}">
+        </div>
+        <div>
+          <label style="font-size:10px;color:#6b5740;">Dirección</label>
+          <input class="cd-inp" id="cdEmpresaDir" placeholder="Av. Principal 123" value="${_efDir}">
+        </div>
+        <div>
+          <label style="font-size:10px;color:#6b5740;">Comuna</label>
+          <input class="cd-inp" id="cdEmpresaComuna" placeholder="Santiago" value="${_efComuna}">
+        </div>
+        <div>
+          <label style="font-size:10px;color:#6b5740;">Giro / actividad</label>
+          <input class="cd-inp" id="cdEmpresaGiro" placeholder="Servicios profesionales" value="${_efGiro}">
+        </div>
+        <div>
+          <label style="font-size:10px;color:#6b5740;">Contacto</label>
+          <input class="cd-inp" id="cdEmpresaContacto" placeholder="Nombre del contacto" value="${_efContacto}">
+        </div>
       </div>
     </div>
   </div>`;
@@ -1739,6 +1898,46 @@ function abrirDatosDirecta(reservaId){
     el.style.cssText="width:100%;padding:6px 8px;border:1px solid #ddd;border-radius:6px;font-size:12px;font-family:inherit;box-sizing:border-box;";
   });
   document.getElementById("modalDatosDirecta").style.display="flex";
+}
+
+// Mostrar/ocultar la sección de empresa según docType
+function cdToggleEmpresa(){
+  var sel = document.getElementById("cdDocType");
+  var wrap = document.getElementById("cdEmpresaWrap");
+  if(!sel || !wrap) return;
+  wrap.style.display = (sel.value === "factura") ? "block" : "none";
+}
+
+// Buscar empresa por RUT: primero cache local, luego API opcional
+async function cdLookupEmpresa(){
+  var rutInp = document.getElementById("cdEmpresaRUT");
+  if(!rutInp) return;
+  var rutVal = rutInp.value.trim();
+  if(!rutVal) return;
+  // Normalizar formato del input
+  try{ rutInp.value = formatRUT(rutVal); }catch(e){}
+  // Validar checksum
+  if(!validarRUT(rutVal)){
+    if(typeof toast === "function") toast("RUT inválido — revisa el dígito verificador","warn");
+    rutInp.style.borderColor = "#dc2626";
+    setTimeout(function(){ rutInp.style.borderColor = "#ddd"; }, 1500);
+    return;
+  }
+  rutInp.style.borderColor = "#2dd468";
+  // Buscar en cache + API si está configurada
+  var emp = await lookupEmpresaPorRUT(rutVal);
+  if(!emp){
+    if(typeof toast === "function") toast("RUT nuevo — completa los datos a mano (se guardarán en cache)","ok",2500);
+    return;
+  }
+  // Auto-rellenar campos
+  var byId = function(id){ return document.getElementById(id); };
+  if(byId("cdEmpresaRazon")    && !byId("cdEmpresaRazon").value)    byId("cdEmpresaRazon").value    = emp.razonSocial || "";
+  if(byId("cdEmpresaDir")      && !byId("cdEmpresaDir").value)      byId("cdEmpresaDir").value      = emp.direccion   || "";
+  if(byId("cdEmpresaComuna")   && !byId("cdEmpresaComuna").value)   byId("cdEmpresaComuna").value   = emp.comuna      || "";
+  if(byId("cdEmpresaGiro")     && !byId("cdEmpresaGiro").value)     byId("cdEmpresaGiro").value     = emp.giro        || "";
+  if(byId("cdEmpresaContacto") && !byId("cdEmpresaContacto").value) byId("cdEmpresaContacto").value = emp.contacto    || "";
+  if(typeof toast === "function") toast("✓ Datos de empresa cargados","ok",2000);
 }
 
 function guardarDatosDirecta(imprimir){
@@ -1762,6 +1961,27 @@ function guardarDatosDirecta(imprimir){
   r.precio    = document.getElementById("cdPrecio")?.value||r.precio||"";
   r.docType   = document.getElementById("cdDocType")?.value||r.docType||"boleta";
   r.patente   = document.getElementById("cdPatente")?.value.trim()||"";
+  // Nuevos campos: número de documento fiscal y método de pago
+  r.nDocumento = document.getElementById("cdNDoc")?.value.trim() || r.nDocumento || "";
+  r.metodoPago = document.getElementById("cdMetodoPago")?.value || r.metodoPago || "";
+  // Empresa a facturar (solo aplica si docType=factura)
+  if(r.docType === "factura"){
+    var _ef = {
+      rut:         document.getElementById("cdEmpresaRUT")?.value.trim()      || "",
+      razonSocial: document.getElementById("cdEmpresaRazon")?.value.trim()    || "",
+      direccion:   document.getElementById("cdEmpresaDir")?.value.trim()      || "",
+      comuna:      document.getElementById("cdEmpresaComuna")?.value.trim()   || "",
+      giro:        document.getElementById("cdEmpresaGiro")?.value.trim()     || "",
+      contacto:    document.getElementById("cdEmpresaContacto")?.value.trim() || ""
+    };
+    if(_ef.rut){
+      r.empresaFactura = _ef;
+      // Cachear en hv_empresas para reutilizar próximas veces
+      try{ saveEmpresa(_ef); }catch(e){ console.warn("[saveEmpresa]", e); }
+    }
+  } else {
+    // Si cambió a boleta/exento, dejamos r.empresaFactura como estaba (no borrar histórico)
+  }
   r.datosFaltantes = false;
   reservas[idx] = r;
   safeSave("hv_reservas", reservas);
@@ -4311,6 +4531,43 @@ document.addEventListener('DOMContentLoaded',function(){
           <div id="ivaResumen" class="iva-resumen"></div>
           <div id="ndocWrap" style="display:none;"></div>
         </div>
+        <!-- Empresa a facturar (solo visible si docType=factura) -->
+        <div id="empresaFacturaBox" style="display:none;margin-bottom:10px;padding:10px 12px;background:#fef9f0;border:1px solid #f0d9a8;border-radius:8px;">
+          <div style="font-size:11px;font-weight:700;color:#92400e;margin-bottom:4px;display:flex;align-items:center;justify-content:space-between;gap:6px;">
+            <span>📄 Empresa a facturar</span>
+            <span style="font-size:9px;font-weight:500;color:#a07a3a;">Distinta del huésped — datos para la factura</span>
+          </div>
+          <div class="pg4" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+            <div style="grid-column:span 2;">
+              <label style="font-size:11px;color:var(--t2);display:block;margin-bottom:3px;">RUT empresa</label>
+              <div style="display:flex;gap:6px;">
+                <input id="empRut" class="inp" list="empRutList" placeholder="76.123.456-7" oninput="rTxt()" onblur="empLookupRUT()" style="font-size:13px;flex:1;">
+                <datalist id="empRutList"></datalist>
+                <button type="button" onclick="empLookupRUT()" style="padding:6px 12px;background:#d4a96a;color:#3A2E1E;border:none;border-radius:6px;cursor:pointer;font-size:11px;font-weight:700;font-family:inherit;white-space:nowrap;">Buscar</button>
+              </div>
+            </div>
+            <div style="grid-column:span 2;">
+              <label style="font-size:11px;color:var(--t2);display:block;margin-bottom:3px;">Razón social</label>
+              <input id="empRazon" class="inp" placeholder="Hotel ABC SpA" oninput="rTxt()" style="font-size:13px;">
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--t2);display:block;margin-bottom:3px;">Dirección</label>
+              <input id="empDir" class="inp" placeholder="Av. Principal 123" oninput="rTxt()" style="font-size:13px;">
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--t2);display:block;margin-bottom:3px;">Comuna</label>
+              <input id="empComuna" class="inp" placeholder="Santiago" oninput="rTxt()" style="font-size:13px;">
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--t2);display:block;margin-bottom:3px;">Giro</label>
+              <input id="empGiro" class="inp" placeholder="Servicios profesionales" oninput="rTxt()" style="font-size:13px;">
+            </div>
+            <div>
+              <label style="font-size:11px;color:var(--t2);display:block;margin-bottom:3px;">Contacto</label>
+              <input id="empContacto" class="inp" placeholder="Nombre del contacto" oninput="rTxt()" style="font-size:13px;">
+            </div>
+          </div>
+        </div>
         <div class="pg4" style="margin-bottom:8px;">
           <div>
             <label style="font-size:11px;color:var(--t2);display:block;margin-bottom:3px;">Teléfono de contacto</label>
@@ -4323,6 +4580,17 @@ document.addEventListener('DOMContentLoaded',function(){
               <option value="vehiculo">Vehículo particular</option>
               <option value="bus">Bus</option>
               <option value="transfer">Transfer</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--t2);display:block;margin-bottom:3px;">Método de pago</label>
+            <select id="metodoPago" class="inp" oninput="rTxt()" style="font-size:13px;">
+              <option value="">Seleccionar...</option>
+              <option value="Efectivo">Efectivo</option>
+              <option value="Debito">Débito</option>
+              <option value="Credito">Crédito</option>
+              <option value="Transferencia">Transferencia</option>
+              <option value="Booking">Cobro Booking</option>
             </select>
           </div>
         </div>
@@ -6499,9 +6767,73 @@ function setDocType(tipo){
     const btn=document.getElementById("dt"+t.charAt(0).toUpperCase()+t.slice(1));
     if(btn) btn.classList.toggle("on",t===tipo);
   });
+  // Mostrar/ocultar bloque empresa según docType
+  const empBox = document.getElementById("empresaFacturaBox");
+  if(empBox) empBox.style.display = (tipo==="factura") ? "block" : "none";
+  // Refrescar el datalist de empresas conocidas para auto-complete por RUT
+  if(tipo==="factura") refreshEmpresaDatalist();
   renderIVAResumen();
   rTxt();
 }
+
+// Cargar lista de RUTs cacheados al datalist del input principal
+function refreshEmpresaDatalist(){
+  const dl = document.getElementById("empRutList");
+  if(!dl) return;
+  try{
+    const todas = (typeof getEmpresas==="function") ? getEmpresas() : {};
+    dl.innerHTML = Object.values(todas).map(function(e){
+      return "<option value=\""+(e.rut||"")+"\">"+(e.razonSocial||"")+"</option>";
+    }).join("");
+  }catch(e){ console.warn("[refreshEmpresaDatalist]", e); }
+}
+
+// Lookup para el formulario principal de cotización
+async function empLookupRUT(){
+  const inp = document.getElementById("empRut");
+  if(!inp) return;
+  const rutVal = inp.value.trim();
+  if(!rutVal) return;
+  try{ inp.value = formatRUT(rutVal); }catch(e){}
+  if(!validarRUT(rutVal)){
+    if(typeof toast==="function") toast("RUT inválido — revisa el dígito verificador","warn");
+    inp.style.borderColor = "#dc2626";
+    setTimeout(function(){ inp.style.borderColor = ""; }, 1500);
+    return;
+  }
+  inp.style.borderColor = "#2dd468";
+  const emp = await lookupEmpresaPorRUT(rutVal);
+  if(!emp){
+    if(typeof toast==="function") toast("RUT nuevo — completa los datos a mano (se cachearán)","ok",2500);
+    return;
+  }
+  const set = function(id,val){ var el=document.getElementById(id); if(el && !el.value && val) el.value=val; };
+  set("empRazon",    emp.razonSocial);
+  set("empDir",      emp.direccion);
+  set("empComuna",   emp.comuna);
+  set("empGiro",     emp.giro);
+  set("empContacto", emp.contacto);
+  if(typeof toast==="function") toast("✓ Datos de empresa cargados","ok",2000);
+  rTxt();
+}
+
+// Lee los campos de empresa del formulario principal y devuelve el objeto
+function getEmpresaFromForm(){
+  if(docType !== "factura") return null;
+  const get = function(id){ var el=document.getElementById(id); return el ? el.value.trim() : ""; };
+  const rut = get("empRut");
+  if(!rut) return null;
+  return {
+    rut:         rut,
+    razonSocial: get("empRazon"),
+    direccion:   get("empDir"),
+    comuna:      get("empComuna"),
+    giro:        get("empGiro"),
+    contacto:    get("empContacto")
+  };
+}
+
+function getMetodoPago(){ return document.getElementById("metodoPago")?.value || ""; }
 
 function renderIVAResumen(){
   const total=items.reduce((a,it)=>a+subtotalHab(it),0);
@@ -6849,7 +7181,29 @@ function genC(){
     tribBloque+=`  Monto neto: ${fmt(neto)}\n  IVA 19%: ${fmt(iva)}\n  Total ${docType}: ${fmt(bruto)}`;
     if(nDoc) tribBloque+=`\n  N° Documento: ${nDoc}`;
   }
-  return `${HDR}\n${sep()}\n${t.saludo(nombre)}\n\n${t.intro_c}\n\n${sep()}\n${t.f_cot}: ${hoy()}\n${t.checkin}: ${fmtF(i)}\n${t.checkout}: ${fmtF(o)}\n${sep()}\n${detH(t)}\n${sep()}\n${t.t_huesp}: ${totalH}\n⭐ ${t.total}: ${fmt(total)}${tribBloque}\n${sep()}\n${bInfo(t)}\n${sep()}\n${t.cierre_c}\n\n${t.firma()}${llegada}${ps}`;
+  // Método de pago (visible en confirmadas)
+  const _met=getMetodoPago();
+  if(_met){
+    const _metLabels={"Efectivo":"Efectivo","Debito":"Tarjeta de débito","Credito":"Tarjeta de crédito","Transferencia":"Transferencia","Booking":"Cobro a través de Booking"};
+    tribBloque+=`\n  Forma de pago: ${_metLabels[_met]||_met}`;
+  }
+  // Bloque empresa (solo si docType=factura y se ingresó al menos el RUT)
+  let empBloque="";
+  const _ef = getEmpresaFromForm();
+  if(_ef && _ef.rut){
+    empBloque=`\n${sep()}\n🏢 DATOS DE FACTURACIÓN (empresa)\n`;
+    empBloque+=`  RUT: ${_ef.rut}\n`;
+    if(_ef.razonSocial) empBloque+=`  Razón social: ${_ef.razonSocial}\n`;
+    if(_ef.giro)        empBloque+=`  Giro: ${_ef.giro}\n`;
+    if(_ef.direccion){
+      empBloque+=`  Dirección: ${_ef.direccion}`;
+      if(_ef.comuna) empBloque+=`, ${_ef.comuna}`;
+      empBloque+=`\n`;
+    }
+    if(_ef.contacto)    empBloque+=`  Contacto: ${_ef.contacto}\n`;
+    empBloque+=`  ⓘ Persona reservante: ${nombre} (los datos del huésped pueden diferir de la empresa)`;
+  }
+  return `${HDR}\n${sep()}\n${t.saludo(nombre)}\n\n${t.intro_c}\n\n${sep()}\n${t.f_cot}: ${hoy()}\n${t.checkin}: ${fmtF(i)}\n${t.checkout}: ${fmtF(o)}\n${sep()}\n${detH(t)}\n${sep()}\n${t.t_huesp}: ${totalH}\n⭐ ${t.total}: ${fmt(total)}${tribBloque}${empBloque}\n${sep()}\n${bInfo(t)}\n${sep()}\n${t.cierre_c}\n\n${t.firma()}${llegada}${ps}`;
 }
 
 function rTxt(){
@@ -6906,9 +7260,31 @@ function guardar(){
     _guardarLock=false;toast("⚠️ Hab. "+dupRooms.map(h=>h.roomNum).join(", ")+" ya tiene reserva en esas fechas. Revisa antes de guardar.","err",5000);
     return; // Bloquear guardado — doble booking no permitido
   }
+  // Datos de pago y empresa (compartidos para todas las habitaciones de esta cotización)
+  const _empFact = getEmpresaFromForm();
+  const _metPago = getMetodoPago();
+  // Cachear empresa (reutilizable en próximas facturas)
+  if(_empFact && _empFact.rut){
+    try{ saveEmpresa(_empFact); }catch(e){ console.warn("[saveEmpresa]", e); }
+  }
   pax.forEach((h,hIdx)=>{
     if(h.roomNum){
-      reservas.push({id:rid+h.roomNum,roomNum:h.roomNum,tipoIdx:h.tipoIdx,checkin:i,checkout:o,nombre:gN()||h.pl.map(p=>p.nombre).filter(Boolean).join(", ")||"Huésped",noches:nochesCalc,pax:items[hIdx]?items[hIdx].huespedes:h.pl.length,docType:docType||"boleta",nDocumento:getNDocumento(),telefono:getTelContacto()||"",medio:getMedio()||"",patente:getPatente()||"",precio:String(items[hIdx]?subtotalHab(items[hIdx]):subtotalHab({tipoIdx:h.tipoIdx,huespedes:h.pl.length}))});
+      const _resv = {
+        id:rid+h.roomNum,roomNum:h.roomNum,tipoIdx:h.tipoIdx,
+        checkin:i,checkout:o,
+        nombre:gN()||h.pl.map(p=>p.nombre).filter(Boolean).join(", ")||"Huésped",
+        noches:nochesCalc,
+        pax:items[hIdx]?items[hIdx].huespedes:h.pl.length,
+        docType:docType||"boleta",
+        nDocumento:getNDocumento(),
+        telefono:getTelContacto()||"",
+        medio:getMedio()||"",
+        patente:getPatente()||"",
+        metodoPago:_metPago||"",
+        precio:String(items[hIdx]?subtotalHab(items[hIdx]):subtotalHab({tipoIdx:h.tipoIdx,huespedes:h.pl.length}))
+      };
+      if(_empFact) _resv.empresaFactura = _empFact;
+      reservas.push(_resv);
     }
     if(h.roomNum) h.pl.forEach(p=>{
       if(p.nombre||p.doc){
@@ -7293,8 +7669,18 @@ function verR(id){
         ${r.patente?`<div style="display:flex;justify-content:space-between;"><span style="color:#666;">🚗 Patente</span><strong>${r.patente}</strong></div>`:""}
         <div style="display:flex;justify-content:space-between;"><span style="color:#666;">${docIco} Documento</span><strong>${doc.charAt(0).toUpperCase()+doc.slice(1)}</strong></div>
         ${r.nDocumento?`<div style="display:flex;justify-content:space-between;"><span style="color:#666;">📋 N° Documento</span><strong style="color:#1e40af;">${r.nDocumento}</strong></div>`:""}
+        ${r.metodoPago?`<div style="display:flex;justify-content:space-between;"><span style="color:#666;">💳 Método pago</span><strong>${esc(r.metodoPago)}</strong></div>`:""}
         ${r.notas?`<div style="display:flex;justify-content:space-between;"><span style="color:#666;">📝 Notas</span><span style="color:#555;text-align:right;max-width:180px;">${esc(r.notas)}</span></div>`:""}
       </div>
+      ${(doc==="factura" && r.empresaFactura && r.empresaFactura.rut)?`
+      <div style="background:#fef9f0;border:1px solid #f0d9a8;border-radius:10px;padding:10px 12px;margin-bottom:14px;font-size:11px;line-height:1.7;">
+        <div style="font-weight:700;color:#92400e;margin-bottom:4px;">📄 Empresa a facturar</div>
+        <div style="display:flex;justify-content:space-between;"><span style="color:#666;">RUT</span><strong>${esc(r.empresaFactura.rut)}</strong></div>
+        ${r.empresaFactura.razonSocial?`<div style="display:flex;justify-content:space-between;"><span style="color:#666;">Razón social</span><strong>${esc(r.empresaFactura.razonSocial)}</strong></div>`:""}
+        ${r.empresaFactura.giro?`<div style="display:flex;justify-content:space-between;"><span style="color:#666;">Giro</span><span style="color:#444;text-align:right;max-width:200px;">${esc(r.empresaFactura.giro)}</span></div>`:""}
+        ${r.empresaFactura.direccion?`<div style="display:flex;justify-content:space-between;"><span style="color:#666;">Dirección</span><span style="color:#444;text-align:right;max-width:200px;">${esc(r.empresaFactura.direccion)}${r.empresaFactura.comuna?", "+esc(r.empresaFactura.comuna):""}</span></div>`:""}
+        ${r.empresaFactura.contacto?`<div style="display:flex;justify-content:space-between;"><span style="color:#666;">Contacto</span><strong>${esc(r.empresaFactura.contacto)}</strong></div>`:""}
+      </div>`:""}
       <div style="display:flex;gap:8px;margin-bottom:8px;">
         <button onclick="printCheckinSheet('${id}');document.getElementById('${modalId}').remove()" style="flex:1;padding:10px;border:none;border-radius:10px;background:linear-gradient(135deg,#3A2E1E,#5a4a38);color:#fff;cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;">🖨 Ficha Individual</button>
         <button onclick="printFichaGrupal('${id}');document.getElementById('${modalId}').remove()" style="flex:1;padding:10px;border:none;border-radius:10px;background:linear-gradient(135deg,#5c4a32,#8b7355);color:#fff;cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;">👥 Ficha Grupal</button>
@@ -7372,8 +7758,18 @@ function verBK(id){
         ${bk.precio?`<div style="display:flex;justify-content:space-between;"><span style="color:#666;">💰 Precio</span><strong style="color:#b45309;">${(function(p){const n=parseFloat(String(p).replace(/\./g,'').replace(/,/g,'.').replace(/[^\d.]/g,''));return n>0?fmt2(n):p;})(bk.precio)}</strong></div>`:""}
         ${bk.pais?`<div style="display:flex;justify-content:space-between;"><span style="color:#666;">🌍 País</span><strong>${bk.pais}</strong></div>`:""}
         ${bk.docType?`<div style="display:flex;justify-content:space-between;"><span style="color:#666;">🧾 Documento</span><strong>${{"boleta":"Boleta","factura":"Factura","exento":"Exento (turista)"}[bk.docType]||bk.docType}</strong></div>`:""}
+        ${bk.metodoPago?`<div style="display:flex;justify-content:space-between;"><span style="color:#666;">💳 Método pago</span><strong>${esc(bk.metodoPago)}</strong></div>`:""}
         ${bk.notas?`<div style="display:flex;justify-content:space-between;"><span style="color:#666;">📝 Notas</span><span style="color:#555;text-align:right;max-width:200px;">${esc(bk.notas)}</span></div>`:""}
       </div>
+      ${(bk.docType==="factura" && bk.empresaFactura && bk.empresaFactura.rut)?`
+      <div style="background:#fef9f0;border:1px solid #f0d9a8;border-radius:10px;padding:10px 12px;margin-bottom:14px;font-size:11px;line-height:1.7;">
+        <div style="font-weight:700;color:#92400e;margin-bottom:4px;">📄 Empresa a facturar</div>
+        <div style="display:flex;justify-content:space-between;"><span style="color:#666;">RUT</span><strong>${esc(bk.empresaFactura.rut)}</strong></div>
+        ${bk.empresaFactura.razonSocial?`<div style="display:flex;justify-content:space-between;"><span style="color:#666;">Razón social</span><strong>${esc(bk.empresaFactura.razonSocial)}</strong></div>`:""}
+        ${bk.empresaFactura.giro?`<div style="display:flex;justify-content:space-between;"><span style="color:#666;">Giro</span><span style="color:#444;text-align:right;max-width:200px;">${esc(bk.empresaFactura.giro)}</span></div>`:""}
+        ${bk.empresaFactura.direccion?`<div style="display:flex;justify-content:space-between;"><span style="color:#666;">Dirección</span><span style="color:#444;text-align:right;max-width:200px;">${esc(bk.empresaFactura.direccion)}${bk.empresaFactura.comuna?", "+esc(bk.empresaFactura.comuna):""}</span></div>`:""}
+        ${bk.empresaFactura.contacto?`<div style="display:flex;justify-content:space-between;"><span style="color:#666;">Contacto</span><strong>${esc(bk.empresaFactura.contacto)}</strong></div>`:""}
+      </div>`:""}
       <div style="display:flex;gap:8px;margin-bottom:8px;">
         <button onclick="printCheckinSheet('${id}');document.getElementById('${modalId}').remove()" style="flex:1;padding:10px;border:none;border-radius:10px;background:linear-gradient(135deg,#3A2E1E,#5a4a38);color:#fff;cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;">🖨 Ficha Individual</button>
         <button onclick="printFichaGrupal('${id}');document.getElementById('${modalId}').remove()" style="flex:1;padding:10px;border:none;border-radius:10px;background:linear-gradient(135deg,#5c4a32,#8b7355);color:#fff;cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;">👥 Ficha Grupal</button>
@@ -9077,13 +9473,39 @@ function expExcel(){
     // N° Doc (titular)
     const numDoc = (t.doc && t.doc !== "—") ? t.doc : "";
 
+    // Método de pago (M en el template) — se toma de la reserva, no del registro INE.
+    // El template oficial usa esta columna para decidir si aplica la comisión 3%.
+    let metPago = "";
+    if(res && res.metodoPago) metPago = res.metodoPago;
+    // Si la reserva viene de Booking.com y no se especificó otro método de pago,
+    // se asume que la cobró Booking (el template aplica comisión 3% por ese flag).
+    if(!metPago && red === "Booking") metPago = "Booking";
+
+    // Tipo de documento fiscal (factura/boleta/exento) → columna O ("Factura")
+    let docFiscal = "";
+    if(res && res.docType){
+      if(res.docType === "factura") docFiscal = "Factura";
+      else if(res.docType === "boleta") docFiscal = "Boleta";
+      else if(res.docType === "exento") docFiscal = "Exento";
+    }
+
     // Fila Excel (índice numérico de fila para fórmulas)
     const excelRow = idx + 2; // header en fila 1, datos desde fila 2
 
-    // Fórmulas para Q (comisión 3% si Booking) y R (total + comisión)
-    const formulaComision = (red==="Booking" && totalCLP) ? { f: "P"+excelRow+"*0.03" } : "";
-    const formulaTotalTarjeta = (red==="Booking" && totalCLP) ? { f: "P"+excelRow+"+Q"+excelRow } : "";
-    const formulaTotal = totalCLP ? { f: (red==="Booking" ? "R"+excelRow : "P"+excelRow) } : "";
+    // Fórmulas alineadas con el template oficial:
+    // Q (-3%) = IF(M="Debito", P*0.03, IF(M="Credito", P*0.03, IF(M="Booking", P*0.03, "")))
+    // R (Total Tarjeta) = IF(Q="", "", P+Q)
+    // T (Total) = IF(R="", P, R)
+    // Esto evita confiar en la "Red" para decidir la comisión.
+    const formulaComision = totalCLP
+      ? { f: 'IF(OR(M'+excelRow+'="Debito",M'+excelRow+'="Credito",M'+excelRow+'="Booking"),P'+excelRow+'*0.03,"")' }
+      : "";
+    const formulaTotalTarjeta = totalCLP
+      ? { f: 'IF(Q'+excelRow+'="","",P'+excelRow+'+Q'+excelRow+')' }
+      : "";
+    const formulaTotal = totalCLP
+      ? { f: 'IF(R'+excelRow+'="",P'+excelRow+',R'+excelRow+')' }
+      : "";
 
     rows.push([
       t.checkin ? new Date(t.checkin+"T12:00:00") : "",  // A
@@ -9094,9 +9516,9 @@ function expExcel(){
       nacCanon,                                           // F
       origen,                                             // G
       counts[0], counts[1], counts[2], counts[3], counts[4], // H I J K L
-      "",                                                 // M Metodo Pago (sin dato)
+      metPago,                                            // M Metodo Pago
       numDoc,                                             // N N°Doc
-      "",                                                 // O Factura
+      docFiscal,                                          // O Factura/Boleta/Exento
       totalCLP,                                           // P Total Booking
       formulaComision,                                    // Q -3%
       formulaTotalTarjeta,                                // R Total Tarjeta
