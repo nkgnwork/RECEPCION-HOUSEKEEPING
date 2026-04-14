@@ -1538,7 +1538,7 @@ const RESERVAS_CUADERNO = [
   // ── IMG_4784 · Semana 6-12 Abril 2026 ───────────────────────
   { id:"CUAD_229_20260406", nombre:"Ageri",    checkin:"2026-04-06", checkout:"2026-04-08", roomNum:229, pax:2, fuente:"directo",  esBooking:false, noches:2, notas:"Cuaderno 6-12/4" },
   { id:"CUAD_228_20260406", nombre:"Ageri",    checkin:"2026-04-06", checkout:"2026-04-08", roomNum:228, pax:2, fuente:"directo",  esBooking:false, noches:2, notas:"Cuaderno 6-12/4 — M228 (Matrimonial)" },
-  { id:"CUAD_204_20260410", nombre:"Stein",    checkin:"2026-04-10", checkout:"2026-04-12", roomNum:204, pax:2, fuente:"booking",  esBooking:true,  noches:2, notas:"Cuaderno 6-12/4" },
+  { id:"CUAD_204_20260410", nombre:"Stein",    checkin:"2026-04-10", checkout:"2026-04-13", roomNum:204, pax:2, fuente:"booking",  esBooking:true,  noches:3, notas:"Cuaderno 6-12/4 — cubre V,S,D (checkout lunes 13)" },
   // ── IMG_4785 · Semana 13-19 Abril 2026 ──────────────────────
   { id:"CUAD_203_20260413", nombre:"Stein",    checkin:"2026-04-13", checkout:"2026-04-14", roomNum:203, pax:3, fuente:"booking",  esBooking:true,  noches:1, notas:"Cuaderno 13-19/4" },
   { id:"CUAD_119_20260417", nombre:"Sabine",   checkin:"2026-04-17", checkout:"2026-04-19", roomNum:119, pax:3, fuente:"booking",  esBooking:true,  noches:2, notas:"Cuaderno 13-19/4" },
@@ -1786,6 +1786,27 @@ window.addEventListener("DOMContentLoaded", function(){
       localStorage.setItem("hv_admin_hash", h);
       localStorage.removeItem("hv_admin_clave");
     });
+  }
+  // ── Migración Stein (Abr 2026): la reserva digitalizada desde el cuaderno
+  // quedó partida entre dos fotos (sem 6-12 y sem 13-19), dejando el domingo
+  // 12 sin cubrir. En Booking era una sola estadía de 4 noches (V,S,D,L).
+  // Fix: extender CUAD_204_20260410 de checkout 2026-04-12 → 2026-04-13.
+  if(!localStorage.getItem("hv_mig_stein_domingo")){
+    try{
+      var _bk = JSON.parse(localStorage.getItem("hv_booking")||"[]");
+      var _steinRes = _bk.find(function(r){ return r && r.id==="CUAD_204_20260410"; });
+      if(_steinRes && _steinRes.checkout==="2026-04-12"){
+        _steinRes.checkout = "2026-04-13";
+        _steinRes.noches = 3;
+        if(typeof _steinRes.notas === "string"){
+          _steinRes.notas = _steinRes.notas.replace(/(Cuaderno[^"]*)/, "$1 — mig: cubrir Dom");
+        }
+        localStorage.setItem("hv_booking", JSON.stringify(_bk));
+        try{ sbSet("hv_booking", _bk); }catch(e){}
+        console.log("[migración] Stein: checkout 12→13 Abr para cubrir domingo");
+      }
+      localStorage.setItem("hv_mig_stein_domingo","1");
+    }catch(e){ console.warn("[migración Stein] falló:", e); }
   }
   initDark();
   // Hash router: pre-registro público
