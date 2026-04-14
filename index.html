@@ -264,7 +264,7 @@ async function importarFotoCuaderno(input){
   try{
     var b64 = await toBase64(file);
     var mediaType = file.type || "image/jpeg";
-    var prompt = "Eres un asistente experto que extrae reservas de fotos de cuadernos de hotel.\nHabitaciones Hotel Las Vicuñas: Familiar(102,103,202)=$90.000, Triple(118-121)=$77.350, Matrimonial(228)=$65.450, Flex/Doble(resto)=$59.500-$50.000\nExtrae TODAS las reservas visibles. Responde SOLO JSON válido sin markdown ni explicaciones:\n{\"reservas\":[{\"nombre\":\"Apellido Nombre\",\"checkin\":\"YYYY-MM-DD\",\"checkout\":\"YYYY-MM-DD\",\"habitacion\":\"tipo o numero de hab\",\"pax\":2,\"precio_estimado\":118900,\"telefono\":\"\",\"numReserva\":\"\",\"pais\":\"\",\"notas\":\"obs\"}]}";
+    var prompt = "Eres un asistente experto que extrae reservas de fotos de cuadernos de hotel.\nHabitaciones Hotel Las Vicuñas: Familiar(102,103,202)=$77.350, Triple(118-121)=$77.350, Matrimonial(228)=$65.450, Doble=$59.500, Single=$53.550\nExtrae TODAS las reservas visibles. Responde SOLO JSON válido sin markdown ni explicaciones:\n{\"reservas\":[{\"nombre\":\"Apellido Nombre\",\"checkin\":\"YYYY-MM-DD\",\"checkout\":\"YYYY-MM-DD\",\"habitacion\":\"tipo o numero de hab\",\"pax\":2,\"precio_estimado\":118900,\"telefono\":\"\",\"numReserva\":\"\",\"pais\":\"\",\"notas\":\"obs\"}]}";
     var response = await fetch("https://api.anthropic.com/v1/messages", {
       method:"POST",
       headers:{"Content-Type":"application/json","x-api-key":localStorage.getItem("hlv_anthropic_key")||"","anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
@@ -4783,7 +4783,7 @@ const HABS = [
     key:"single",
     nombres:{"Español":"Habitación single","Inglés":"Single room","Portugués":"Quarto single","Francés":"Chambre simple","Alemán":"Einzelzimmer","Italiano":"Camera singola","中文":"单人间"},
     camas:{"Español":"1 cama de plaza y media","Inglés":"1 queen-size bed","Portugués":"1 cama de solteiro grande","Francés":"1 lit queen","Alemán":"1 Queen-Size-Bett","Italiano":"1 letto queen size","中文":"1张大单人床"},
-    precio:50000, capBase:1
+    precio:53550, capBase:1
   },
   {
     key:"doble",
@@ -4807,7 +4807,7 @@ const HABS = [
     key:"familiar",
     nombres:{"Español":"Habitación familiar","Inglés":"Family room","Portugués":"Quarto familiar","Francés":"Chambre familiale","Alemán":"Familienzimmer","Italiano":"Camera familiare","中文":"家庭房"},
     camas:{"Español":"1 cama matrimonial + 1 cama de plaza y media","Inglés":"1 double bed + 1 queen-size bed","Portugués":"1 cama de casal + 1 cama de solteiro grande","Francés":"1 lit double + 1 lit queen","Alemán":"1 Doppelbett + 1 Queen-Size-Bett","Italiano":"1 letto matrimoniale + 1 letto queen size","中文":"1张双人床 + 1张大单人床"},
-    precio:90000, capBase:3
+    precio:77350, capBase:3
   },
 ];
 const PRECIO_ADIC = 20000;
@@ -6358,7 +6358,7 @@ function setLang(id){
 const QR_RESPONSES = {
 "Español":[
   {q:"¿Tienen disponibilidad?",ico:"📅",a:`¡Hola! Gracias por contactarnos 😊\n\nPara verificar disponibilidad necesitamos:\n📅 Fechas de check-in y check-out\n👥 Cantidad de personas\n🛏 Tipo de habitación (si tiene preferencia)\n\nQuedamos atentos a su respuesta.\n\n${HOTEL.nombre}\n📍 Baquedano N° 80, Putre`},
-  {q:"¿Cuáles son los precios?",ico:"💰",a:`¡Hola! Nuestras tarifas por noche son:\n\n🛏 Single (1 pax): $50.000\n🛏 Doble (2 pax): $59.500\n💑 Matrimonial (2 pax): $65.450\n🛏 Triple (3 pax): $77.350\n👨‍👩‍👧 Familiar (3 pax): $90.000\n\n👤 Persona adicional: $20.000/noche (máx. 2)\n🍳 Todas las tarifas incluyen desayuno\n\nLos precios son por noche por habitación. ¿Para qué fechas le interesa?\n\n${HOTEL.nombre}`},
+  {q:"¿Cuáles son los precios?",ico:"💰",a:`¡Hola! Nuestras tarifas por noche (con IVA incluido) son:\n\n🛏 Single (1 pax): $53.550\n🛏 Doble (2 pax): $59.500\n💑 Matrimonial (2 pax): $65.450\n🛏 Triple (3 pax): $77.350\n👨‍👩‍👧 Familiar (3 pax): $77.350\n\n👤 Persona adicional: $20.000/noche (máx. 2)\n🍳 Todas las tarifas incluyen desayuno\n\nLos precios son por noche por habitación. ¿Para qué fechas le interesa?\n\n${HOTEL.nombre}`},
   {q:"¿Cómo llego al hotel?",ico:"🗺️",a:`¡Hola! Nuestro hotel está ubicado en:\n📍 Baquedano N° 80, Putre, Arica y Parinacota, Chile\n\n🚗 Desde Arica: ~145 km por Ruta 11-CH (camino pavimentado, ~2.5 horas)\n\nNosotros manejamos el transporte desde Arica. Consulte horarios y tarifas.\n\n⚠️ Putre está a 3.500 msnm — recomendamos aclimatarse gradualmente.\n\n📲 Waze: busque "Hotel Las Vicuñas Putre"\n\n${HOTEL.nombre}`},
   {q:"¿Qué incluye la tarifa?",ico:"🍳",a:`¡Hola! Nuestra tarifa incluye:\n\n🍳 Desayuno para todos los huéspedes\n☕ Lunes a viernes: 07:30 – 09:30\n☕ Fines de semana y festivos: 08:00 – 10:00\n📶 Wi-Fi en todo el hotel\n🅿️ Estacionamiento gratuito\n🏔 Acceso a áreas comunes con vista a la cordillera\n\nToallas de exterior para termas/lagunas: arriendo $2.000 c/u\n\n${HOTEL.nombre}`},
   {q:"Horarios check-in / check-out",ico:"🕐",a:`¡Hola! Nuestros horarios son:\n\n🛎 Check-in: desde las 14:00 hrs.\n🚪 Check-out: hasta las 12:00 hrs.\n\nSi necesita un horario diferente, consúltenos y haremos lo posible por acomodarlo.\n\n${HOTEL.nombre}`},
@@ -6371,7 +6371,7 @@ const QR_RESPONSES = {
 ],
 "Inglés":[
   {q:"Do you have availability?",ico:"📅",a:`Hello! Thank you for contacting us 😊\n\nTo check availability, we need:\n📅 Check-in and check-out dates\n👥 Number of guests\n🛏 Room type preference (if any)\n\nWe look forward to hearing from you.\n\n${HOTEL.nombre}\n📍 Baquedano N° 80, Putre, Chile`},
-  {q:"What are the rates?",ico:"💰",a:`Hello! Our nightly rates are:\n\n🛏 Single (1 guest): $50,000 CLP (~USD $55)\n🛏 Double (2 guests): $59,500 CLP (~USD $65)\n💑 Queen room (2 guests): $65,450 CLP (~USD $72)\n🛏 Triple (3 guests): $77,350 CLP (~USD $85)\n👨‍👩‍👧 Family (3 guests): $90,000 CLP (~USD $99)\n\n👤 Extra person: $20,000 CLP/night (max 2)\n🍳 All rates include breakfast\n\nPrices are per room per night. What dates are you interested in?\n\n${HOTEL.nombre}`},
+  {q:"What are the rates?",ico:"💰",a:`Hello! Our nightly rates (VAT included) are:\n\n🛏 Single (1 guest): $53,550 CLP (~USD $59)\n🛏 Double (2 guests): $59,500 CLP (~USD $65)\n💑 Queen room (2 guests): $65,450 CLP (~USD $72)\n🛏 Triple (3 guests): $77,350 CLP (~USD $85)\n👨‍👩‍👧 Family (3 guests): $77,350 CLP (~USD $85)\n\n👤 Extra person: $20,000 CLP/night (max 2)\n🍳 All rates include breakfast\n\nPrices are per room per night. What dates are you interested in?\n\n${HOTEL.nombre}`},
   {q:"How do I get to the hotel?",ico:"🗺️",a:`Hello! Our hotel is located at:\n📍 Baquedano N° 80, Putre, Arica y Parinacota, Chile\n\n🚗 From Arica: ~145 km via Route 11-CH (paved road, ~2.5 hours)\n\nWe handle transportation from Arica. Ask us about schedules and rates.\n\n⚠️ Putre is at 3,500m altitude — we recommend gradual acclimatization.\n\n📲 Waze: search "Hotel Las Vicuñas Putre"\n\n${HOTEL.nombre}`},
   {q:"What's included in the rate?",ico:"🍳",a:`Hello! Our rate includes:\n\n🍳 Breakfast for all guests\n☕ Mon–Fri: 07:30 – 09:30\n☕ Weekends & holidays: 08:00 – 10:00\n📶 Wi-Fi throughout the hotel\n🅿️ Free parking\n🏔 Access to common areas with mountain views\n\nOutdoor towels for hot springs/lagoons: rental $2,000 CLP each\n\n${HOTEL.nombre}`},
   {q:"Check-in / Check-out times",ico:"🕐",a:`Hello! Our times are:\n\n🛎 Check-in: from 2:00 PM\n🚪 Check-out: until 12:00 PM (noon)\n\nIf you need a different time, let us know and we'll do our best to accommodate.\n\n${HOTEL.nombre}`},
@@ -6384,7 +6384,7 @@ const QR_RESPONSES = {
 ],
 "Portugués":[
   {q:"Vocês têm disponibilidade?",ico:"📅",a:`Olá! Obrigado por nos contatar 😊\n\nPara verificar a disponibilidade precisamos de:\n📅 Datas de check-in e check-out\n👥 Número de hóspedes\n🛏 Tipo de quarto (se tiver preferência)\n\nAguardamos sua resposta.\n\n${HOTEL.nombre}\n📍 Baquedano N° 80, Putre, Chile`},
-  {q:"Quais são as tarifas?",ico:"💰",a:`Olá! Nossas tarifas por noite são:\n\n🛏 Single (1 hóspede): $50.000 CLP\n🛏 Duplo (2 hóspedes): $59.500 CLP\n💑 Casal (2 hóspedes): $65.450 CLP\n🛏 Triplo (3 hóspedes): $77.350 CLP\n👨‍👩‍👧 Familiar (3 hóspedes): $90.000 CLP\n\n👤 Pessoa adicional: $20.000 CLP/noite (máx. 2)\n🍳 Todas as tarifas incluem café da manhã\n\n${HOTEL.nombre}`},
+  {q:"Quais são as tarifas?",ico:"💰",a:`Olá! Nossas tarifas por noite (IVA incluso) são:\n\n🛏 Single (1 hóspede): $53.550 CLP\n🛏 Duplo (2 hóspedes): $59.500 CLP\n💑 Casal (2 hóspedes): $65.450 CLP\n🛏 Triplo (3 hóspedes): $77.350 CLP\n👨‍👩‍👧 Familiar (3 hóspedes): $77.350 CLP\n\n👤 Pessoa adicional: $20.000 CLP/noite (máx. 2)\n🍳 Todas as tarifas incluem café da manhã\n\n${HOTEL.nombre}`},
   {q:"Como chego ao hotel?",ico:"🗺️",a:`Olá! Nosso hotel está localizado em:\n📍 Baquedano N° 80, Putre, Chile\n\n🚗 De Arica: ~145 km pela Ruta 11-CH (estrada pavimentada, ~2,5 horas)\n\nNós cuidamos do transporte desde Arica. Consulte horários e tarifas.\n\n⚠️ Putre está a 3.500m de altitude — recomendamos aclimatação gradual.\n\n${HOTEL.nombre}`},
   {q:"O que está incluído na tarifa?",ico:"🍳",a:`Olá! Nossa tarifa inclui:\n\n🍳 Café da manhã para todos os hóspedes\n☕ Seg–Sex: 07:30 – 09:30\n☕ Fins de semana e feriados: 08:00 – 10:00\n📶 Wi-Fi em todo o hotel\n🅿️ Estacionamento gratuito\n\nToalhas de exterior para termas: aluguel $2.000 CLP cada\n\n${HOTEL.nombre}`},
   {q:"Horários de check-in / check-out",ico:"🕐",a:`Olá! Nossos horários são:\n\n🛎 Check-in: a partir das 14:00\n🚪 Check-out: até as 12:00\n\n${HOTEL.nombre}`},
@@ -6394,7 +6394,7 @@ const QR_RESPONSES = {
 ],
 "Francés":[
   {q:"Avez-vous des disponibilités ?",ico:"📅",a:`Bonjour ! Merci de nous contacter 😊\n\nPour vérifier la disponibilité :\n📅 Dates d'arrivée et de départ\n👥 Nombre de voyageurs\n🛏 Type de chambre souhaité\n\nNous attendons votre réponse.\n\n${HOTEL.nombre}\n📍 Baquedano N° 80, Putre, Chili`},
-  {q:"Quels sont les tarifs ?",ico:"💰",a:`Bonjour ! Nos tarifs par nuit :\n\n🛏 Simple (1 pers.) : $50.000 CLP\n🛏 Double (2 pers.) : $59.500 CLP\n💑 Matrimoniale (2 pers.) : $65.450 CLP\n🛏 Triple (3 pers.) : $77.350 CLP\n👨‍👩‍👧 Familiale (3 pers.) : $90.000 CLP\n\n👤 Personne suppl. : $20.000 CLP/nuit (max 2)\n🍳 Petit-déjeuner inclus\n\n${HOTEL.nombre}`},
+  {q:"Quels sont les tarifs ?",ico:"💰",a:`Bonjour ! Nos tarifs par nuit (TVA incluse) :\n\n🛏 Simple (1 pers.) : $53.550 CLP\n🛏 Double (2 pers.) : $59.500 CLP\n💑 Matrimoniale (2 pers.) : $65.450 CLP\n🛏 Triple (3 pers.) : $77.350 CLP\n👨‍👩‍👧 Familiale (3 pers.) : $77.350 CLP\n\n👤 Personne suppl. : $20.000 CLP/nuit (max 2)\n🍳 Petit-déjeuner inclus\n\n${HOTEL.nombre}`},
   {q:"Comment arriver à l'hôtel ?",ico:"🗺️",a:`Bonjour ! Notre hôtel est situé à :\n📍 Baquedano N° 80, Putre, Chili\n\n🚗 Depuis Arica : ~145 km par la Ruta 11-CH (~2,5 heures)\n\nNous gérons le transport depuis Arica. Consultez-nous pour les horaires.\n\n⚠️ Putre est à 3 500 m d'altitude — nous recommandons une acclimatation progressive.\n\n${HOTEL.nombre}`},
   {q:"Que comprend le tarif ?",ico:"🍳",a:`Bonjour ! Notre tarif comprend :\n\n🍳 Petit-déjeuner pour tous\n☕ Lun–Ven : 07h30 – 09h30\n☕ Week-ends et jours fériés : 08h00 – 10h00\n📶 Wi-Fi dans tout l'hôtel\n🅿️ Parking gratuit\n\nServiettes d'extérieur pour thermes : location 2 000 CLP l'unité\n\n${HOTEL.nombre}`},
   {q:"Horaires d'arrivée / départ",ico:"🕐",a:`Bonjour !\n\n🛎 Arrivée : à partir de 14h00\n🚪 Départ : jusqu'à 12h00\n\n${HOTEL.nombre}`},
@@ -6404,7 +6404,7 @@ const QR_RESPONSES = {
 ],
 "Alemán":[
   {q:"Haben Sie Verfügbarkeit?",ico:"📅",a:`Hallo! Vielen Dank für Ihre Anfrage 😊\n\nUm die Verfügbarkeit zu prüfen, benötigen wir:\n📅 Check-in- und Check-out-Datum\n👥 Anzahl der Gäste\n🛏 Zimmertyp-Präferenz\n\nWir freuen uns auf Ihre Antwort.\n\n${HOTEL.nombre}\n📍 Baquedano N° 80, Putre, Chile`},
-  {q:"Was sind die Preise?",ico:"💰",a:`Hallo! Unsere Preise pro Nacht:\n\n🛏 Einzel (1 Gast): $50.000 CLP\n🛏 Doppel (2 Gäste): $59.500 CLP\n💑 Ehezimmer (2 Gäste): $65.450 CLP\n🛏 Dreibett (3 Gäste): $77.350 CLP\n👨‍👩‍👧 Familie (3 Gäste): $90.000 CLP\n\n👤 Zusatzperson: $20.000 CLP/Nacht (max 2)\n🍳 Frühstück inklusive\n\n${HOTEL.nombre}`},
+  {q:"Was sind die Preise?",ico:"💰",a:`Hallo! Unsere Preise pro Nacht (inkl. MwSt.):\n\n🛏 Einzel (1 Gast): $53.550 CLP\n🛏 Doppel (2 Gäste): $59.500 CLP\n💑 Ehezimmer (2 Gäste): $65.450 CLP\n🛏 Dreibett (3 Gäste): $77.350 CLP\n👨‍👩‍👧 Familie (3 Gäste): $77.350 CLP\n\n👤 Zusatzperson: $20.000 CLP/Nacht (max 2)\n🍳 Frühstück inklusive\n\n${HOTEL.nombre}`},
   {q:"Wie komme ich zum Hotel?",ico:"🗺️",a:`Hallo! Unser Hotel befindet sich in:\n📍 Baquedano N° 80, Putre, Chile\n\n🚗 Von Arica: ~145 km über Ruta 11-CH (~2,5 Stunden)\n\nWir organisieren den Transport ab Arica. Fragen Sie uns nach Fahrplänen.\n\n⚠️ Putre liegt auf 3.500 m Höhe — wir empfehlen schrittweise Akklimatisierung.\n\n${HOTEL.nombre}`},
   {q:"Was ist im Preis enthalten?",ico:"🍳",a:`Hallo! Im Preis enthalten:\n\n🍳 Frühstück für alle Gäste\n☕ Mo–Fr: 07:30 – 09:30\n☕ Wochenende & Feiertage: 08:00 – 10:00\n📶 WLAN im gesamten Hotel\n🅿️ Kostenloser Parkplatz\n\nOutdoor-Handtücher für Thermalquellen: Miete 2.000 CLP/Stück\n\n${HOTEL.nombre}`},
   {q:"Check-in / Check-out Zeiten",ico:"🕐",a:`Hallo!\n\n🛎 Check-in: ab 14:00 Uhr\n🚪 Check-out: bis 12:00 Uhr\n\n${HOTEL.nombre}`},
@@ -6414,7 +6414,7 @@ const QR_RESPONSES = {
 ],
 "Italiano":[
   {q:"Avete disponibilità?",ico:"📅",a:`Salve! Grazie per averci contattato 😊\n\nPer verificare la disponibilità abbiamo bisogno di:\n📅 Date di check-in e check-out\n👥 Numero di ospiti\n🛏 Tipo di camera preferito\n\nRestiamo in attesa.\n\n${HOTEL.nombre}\n📍 Baquedano N° 80, Putre, Cile`},
-  {q:"Quali sono le tariffe?",ico:"💰",a:`Salve! Le nostre tariffe a notte:\n\n🛏 Singola (1 ospite): $50.000 CLP\n🛏 Doppia (2 ospiti): $59.500 CLP\n💑 Matrimoniale (2 ospiti): $65.450 CLP\n🛏 Tripla (3 ospiti): $77.350 CLP\n👨‍👩‍👧 Familiare (3 ospiti): $90.000 CLP\n\n👤 Persona aggiuntiva: $20.000 CLP/notte (max 2)\n🍳 Colazione inclusa\n\n${HOTEL.nombre}`},
+  {q:"Quali sono le tariffe?",ico:"💰",a:`Salve! Le nostre tariffe a notte (IVA inclusa):\n\n🛏 Singola (1 ospite): $53.550 CLP\n🛏 Doppia (2 ospiti): $59.500 CLP\n💑 Matrimoniale (2 ospiti): $65.450 CLP\n🛏 Tripla (3 ospiti): $77.350 CLP\n👨‍👩‍👧 Familiare (3 ospiti): $77.350 CLP\n\n👤 Persona aggiuntiva: $20.000 CLP/notte (max 2)\n🍳 Colazione inclusa\n\n${HOTEL.nombre}`},
   {q:"Come arrivo all'hotel?",ico:"🗺️",a:`Salve! Il nostro hotel si trova a:\n📍 Baquedano N° 80, Putre, Cile\n\n🚗 Da Arica: ~145 km tramite Ruta 11-CH (~2,5 ore)\n\nGestiamo il trasporto da Arica. Chiedete orari e tariffe.\n\n⚠️ Putre è a 3.500 m — consigliamo un acclimatamento graduale.\n\n${HOTEL.nombre}`},
   {q:"Cosa include la tariffa?",ico:"🍳",a:`Salve! La nostra tariffa include:\n\n🍳 Colazione per tutti gli ospiti\n☕ Lun–Ven: 07:30 – 09:30\n☕ Fine settimana e festivi: 08:00 – 10:00\n📶 Wi-Fi in tutto l'hotel\n🅿️ Parcheggio gratuito\n\nAsciugamani da esterno per terme: noleggio 2.000 CLP l'uno\n\n${HOTEL.nombre}`},
   {q:"Orari check-in / check-out",ico:"🕐",a:`Salve!\n\n🛎 Check-in: dalle 14:00\n🚪 Check-out: entro le 12:00\n\n${HOTEL.nombre}`},
@@ -6424,7 +6424,7 @@ const QR_RESPONSES = {
 ],
 "中文":[
   {q:"你们有空房吗？",ico:"📅",a:`您好！感谢您联系我们 😊\n\n请提供以下信息以查询空房：\n📅 入住和退房日期\n👥 客人人数\n🛏 房型偏好\n\n期待您的回复。\n\n${HOTEL.nombre}\n📍 智利普特雷 Baquedano N° 80`},
-  {q:"房价是多少？",ico:"💰",a:`您好！我们的每晚房价：\n\n🛏 单人间（1人）：$50,000 CLP\n🛏 双人间（2人）：$59,500 CLP\n💑 大床房（2人）：$65,450 CLP\n🛏 三人间（3人）：$77,350 CLP\n👨‍👩‍👧 家庭房（3人）：$90,000 CLP\n\n👤 加人：$20,000 CLP/晚（最多2人）\n🍳 所有房价均含早餐\n\n${HOTEL.nombre}`},
+  {q:"房价是多少？",ico:"💰",a:`您好！我们的每晚房价（含税）：\n\n🛏 单人间（1人）：$53,550 CLP\n🛏 双人间（2人）：$59,500 CLP\n💑 大床房（2人）：$65,450 CLP\n🛏 三人间（3人）：$77,350 CLP\n👨‍👩‍👧 家庭房（3人）：$77,350 CLP\n\n👤 加人：$20,000 CLP/晚（最多2人）\n🍳 所有房价均含早餐\n\n${HOTEL.nombre}`},
   {q:"如何到达酒店？",ico:"🗺️",a:`您好！酒店地址：\n📍 智利普特雷 Baquedano N° 80\n\n🚗 从阿里卡出发：约145公里，走11-CH公路（约2.5小时）\n\n我们提供从阿里卡的接送服务，请咨询时刻表。\n\n⚠️ 普特雷海拔3,500米，建议逐步适应高海拔。\n\n${HOTEL.nombre}`},
   {q:"房价包含什么？",ico:"🍳",a:`您好！房价包含：\n\n🍳 所有客人的早餐\n☕ 周一至周五：07:30 – 09:30\n☕ 周末及节假日：08:00 – 10:00\n📶 全酒店Wi-Fi\n🅿️ 免费停车\n\n户外毛巾（温泉用）：租金2,000 CLP/条\n\n${HOTEL.nombre}`},
   {q:"入住/退房时间",ico:"🕐",a:`您好！\n\n🛎 入住：14:00起\n🚪 退房：12:00前\n\n${HOTEL.nombre}`},
@@ -10395,7 +10395,7 @@ function printConfirmacion(reservaId){
   var r=todas.find(function(x){return x.id===reservaId;});
   if(!r){toast("Reserva no encontrada","err");return;}
 
-  var PRECIOS={single:50000,doble:59500,matrimonial:65450,triple:77350,familiar:90000,flex:55000};
+  var PRECIOS={single:53550,doble:59500,matrimonial:65450,triple:77350,familiar:77350,flex:55000};
   var precioBase=PRECIOS[r.tipo]||55000;
   var noches=parseInt(r.noches)||1;
   var totalEst=precioBase*noches;
@@ -10587,7 +10587,7 @@ function printReporteDiario(){
   var sucias=[];
   try{sucias=JSON.parse(localStorage.getItem("hv_sucias")||"[]");}catch(e){}
   // Ingresos estimados del día (check-ins)
-  var PRECIOS={single:50000,doble:59500,matrimonial:65450,triple:77350,familiar:90000,flex:55000};
+  var PRECIOS={single:53550,doble:59500,matrimonial:65450,triple:77350,familiar:77350,flex:55000};
   var ingresosDia=0;
   checkins.forEach(function(r){
     if(r.precio){
