@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+<!-- Hotel Las Vicuñas · Recepción & Housekeeping v4.3 · Build 20260510 -->
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -24,6 +25,9 @@
 <meta name="twitter:card" content="summary">
 <meta name="twitter:title" content="Hotel Las Vicuñas — Recepción">
 <meta name="twitter:description" content="Sistema interno de gestión hotelera · Putre, Altiplano chileno">
+<!-- Configuración local — credenciales (no commitear al repo público) -->
+<script src="config.js" onerror="console.warn('[HLV] config.js no encontrado. App correrá sin sync hasta que se configure.')"></script>
+
 <!-- Supabase SDK -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
@@ -298,6 +302,11 @@ function importarCSV(input){
         var telefono = getCol(row, ["phone","teléfono","telefono","phone number"]);
         var habitacion = getCol(row, ["rooms","room","habitación","habitacion","unit type","unit"]);
         var noches = getCol(row, ["duration","noches","nights","duración"]);
+        // Campos adicionales de Booking: email, observaciones, fecha de booking, método de pago
+        var email = getCol(row, ["email","e-mail","correo","mail"]);
+        var notas = getCol(row, ["remarks","notas","notes","comentarios","special requests","observaciones"]);
+        var bookedOn = parseFecha(getCol(row, ["booked on","booking date","reservado el","fecha reserva","fecha de reserva"]));
+        var pago = getCol(row, ["payment","payment method","método de pago","metodo de pago","forma de pago"]);
         var id = "BK_XLS_" + (numRes || (ci+"_"+nombre.slice(0,10).replace(/\s+/g,"_")));
         if(yaIds.includes(id)) continue;
         yaIds.push(id);
@@ -310,7 +319,10 @@ function importarCSV(input){
           pax:pax, tipo:tipo, fuente:"booking",
           precio:precio||"", telefono:telefono||"",
           numReserva:numRes||"", cancelada:esCancelada,
-          pais:pais||"", docType:docType
+          pais:pais||"", docType:docType,
+          // Nuevos campos Booking
+          email:email||"", notas:notas||"",
+          bookedOn:bookedOn||"", metodoPago:pago||""
         });
       }
       if(!reservas.length){ setBKStatus("No se encontraron reservas válidas (todas canceladas?).","err"); input.value=""; return; }
@@ -357,7 +369,7 @@ async function importarFotoCuaderno(input){
   try{
     var b64 = await toBase64(file);
     var mediaType = file.type || "image/jpeg";
-    var prompt = "Eres un asistente experto que extrae reservas de fotos de cuadernos de hotel.\nHabitaciones Hotel Las Vicuñas: Familiar(102,103,202)=$77.350, Triple(118-121)=$77.350, Matrimonial(228)=$65.450, Doble=$59.500, Single=$53.550\nExtrae TODAS las reservas visibles. Responde SOLO JSON válido sin markdown ni explicaciones:\n{\"reservas\":[{\"nombre\":\"Apellido Nombre\",\"checkin\":\"YYYY-MM-DD\",\"checkout\":\"YYYY-MM-DD\",\"habitacion\":\"tipo o numero de hab\",\"pax\":2,\"precio_estimado\":118900,\"telefono\":\"\",\"numReserva\":\"\",\"pais\":\"\",\"notas\":\"obs\"}]}";
+    var prompt = "Eres un asistente experto que extrae reservas de fotos de cuadernos de hotel.\nHabitaciones Hotel Las Vicuñas: Familiar(102,103,202)=$77.350, Triple(118-121)=$77.350, Matrimonial(228)=$65.450, Doble=$59.500, Single=$53.550\nExtrae TODAS las reservas visibles. Responde SOLO JSON válido sin markdown ni explicaciones. Incluye campos aunque estén vacíos:\n{\"reservas\":[{\"nombre\":\"Apellido Nombre\",\"checkin\":\"YYYY-MM-DD\",\"checkout\":\"YYYY-MM-DD\",\"habitacion\":\"tipo o numero de hab\",\"pax\":2,\"precio_estimado\":118900,\"telefono\":\"\",\"email\":\"\",\"numReserva\":\"\",\"pais\":\"\",\"patente\":\"\",\"metodoPago\":\"\",\"notas\":\"obs\"}]}";
     var response = await fetch("https://api.anthropic.com/v1/messages", {
       method:"POST",
       headers:{"Content-Type":"application/json","x-api-key":localStorage.getItem("hlv_anthropic_key")||"","anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
@@ -388,8 +400,10 @@ async function importarFotoCuaderno(input){
         noches:Math.round((parseLocalDate(co2)-parseLocalDate(ci2))/86400000),
         pax:r.pax||null, tipo:tipo2, fuente:"booking",
         precio:r.precio_estimado?String(r.precio_estimado):"",
-        telefono:r.telefono||"", numReserva:r.numReserva||"",
+        telefono:r.telefono||"", email:r.email||"",
+        numReserva:r.numReserva||"",
         pais:r.pais||"", notas:r.notas||"",
+        patente:r.patente||"", metodoPago:r.metodoPago||"",
         docType:r.pais&&(r.pais.toLowerCase().includes("chile")||r.pais.toLowerCase()==="cl")?"boleta":"exento"};
       enProgreso2.push(entry);
       return entry;
@@ -474,24 +488,69 @@ function syncBookingINE(){
 }
 
 function _agregarReservaAINE(r, pasajeros){
+  // SMART-MERGE: preserva ids/timestamps previos, usa "" (no "—") para faltantes,
+  // hereda datos de la reserva si faltan, marca el titular.
   var registros = getReg();
   var noches = Math.round((parseLocalDate(r.checkout)-parseLocalDate(r.checkin))/86400000);
-  // Remove any existing INE entries for this booking to avoid duplicates
-  if(r.id) registros = registros.filter(function(x){ return x.bookingId !== r.id; });
-  pasajeros.forEach(function(p){
-    registros.push({
-      id:genUID(), timestamp:new Date().toISOString(),
-      bookingId:r.id, nombre:p.nombre||"—", doc:p.doc||"—",
-      tipodoc:p.tipodoc||(r.docType==="exento"?"Pasaporte":"RUT"),
-      nacionalidad:p.nac||(r.docType==="exento"?"Extranjero":"Chile"),
-      residencia:p.resid||"—", ciudad:p.ciudad||"—",
-      checkin:r.checkin, checkout:r.checkout, noches:noches,
-      habitacion:"Hab. "+(r.roomNum||"?"), telefono:r.telefono||"—",
-      medio:r.fuente==="booking"?"Booking.com":r.medio||"Directo", patente:r.patente||"—", totalPax:r.pax||pasajeros.length
+  var existentes = r.id ? registros.filter(function(x){ return x.bookingId === r.id; }) : [];
+  var otros      = r.id ? registros.filter(function(x){ return x.bookingId !== r.id; }) : registros.slice();
+  var _clean = function(v){
+    if(v===undefined || v===null) return "";
+    var s = String(v).trim();
+    return (s==="—" || s==="-" || s==="?" || s==="—" || s.toLowerCase()==="n/a") ? "" : s;
+  };
+  var _pick = function(nuevo, viejo){
+    var n = _clean(nuevo); if(n) return n;
+    return _clean(viejo);
+  };
+  var medioDefault = r.fuente==="booking" ? "Booking.com" : (_clean(r.medio) || "Directo");
+  var nacDefault   = _clean(r.pais) || (r.docType==="exento" ? "Extranjero" : "Chile");
+  var nuevos = [];
+  pasajeros.forEach(function(p, idx){
+    var prev = existentes[idx] || {};
+    nuevos.push({
+      id: prev.id || genUID(),
+      timestamp: prev.timestamp || new Date().toISOString(),
+      bookingId: r.id,
+      esTitular: idx === 0,
+      nombre:       _pick(p.nombre,  prev.nombre)  || _clean(r.nombre),
+      doc:          _pick(p.doc,     prev.doc),
+      tipodoc:      _pick(p.tipodoc, prev.tipodoc) || (r.docType==="exento" ? "Pasaporte" : "RUT"),
+      nacionalidad: _pick(p.nac || p.nacionalidad, prev.nacionalidad) || nacDefault,
+      residencia:   _pick(p.resid || p.residencia, prev.residencia)   || _clean(r.pais),
+      ciudad:       _pick(p.ciudad,  prev.ciudad),
+      checkin:   r.checkin,
+      checkout:  r.checkout,
+      noches:    noches,
+      habitacion:"Hab. "+(r.roomNum||"?"),
+      telefono:  _pick(p.telefono, prev.telefono) || _clean(r.telefono),
+      email:     _pick(p.email,    prev.email)    || (idx===0 ? _clean(r.email) : ""),
+      medio:     _clean(prev.medio) || medioDefault,
+      patente:   _pick(p.patente,  prev.patente)  || _clean(r.patente),
+      notas:     _pick(p.notas,    prev.notas)    || (idx===0 ? _clean(r.notas) : ""),
+      metodoPago:_clean(prev.metodoPago) || _clean(r.metodoPago),
+      bookedOn:  _clean(prev.bookedOn)   || _clean(r.bookedOn),
+      totalPax:  r.pax || pasajeros.length
     });
   });
-  safeSave("hv_registros", registros);
-  sbSet("hv_registros", registros);
+  // Si antes había más pasajeros registrados de los que llegan ahora, los preservamos limpios
+  if(existentes.length > pasajeros.length){
+    for(var i = pasajeros.length; i < existentes.length; i++){
+      var ex = existentes[i];
+      nuevos.push(Object.assign({}, ex, {
+        doc:          _clean(ex.doc),
+        nacionalidad: _clean(ex.nacionalidad),
+        residencia:   _clean(ex.residencia),
+        ciudad:       _clean(ex.ciudad),
+        telefono:     _clean(ex.telefono),
+        patente:      _clean(ex.patente),
+        esTitular:    i === 0
+      }));
+    }
+  }
+  var final = otros.concat(nuevos);
+  safeSave("hv_registros", final);
+  sbSet("hv_registros", final);
 }
 
 function abrirModalPaxFaltantes(reservaId){
@@ -516,6 +575,10 @@ function abrirModalPaxFaltantes(reservaId){
     var defaultResid = _eq(pr ? pr.residencia : (r.pais||""));
     var defaultCiudad = pr ? _eq(pr.ciudad) : "";
     var defDoc = pr ? pr.tipodoc : (r.docType==="exento" ? "Pasaporte" : "RUT");
+    // Campos extras solo para titular: email, teléfono, patente (vienen de Booking o foto-cuaderno)
+    var defaultEmail = (i===0) ? _eq(r.email||"") : "";
+    var defaultTel   = (i===0) ? _eq(pr ? pr.telefono : (r.telefono||"")) : "";
+    var defaultPat   = (i===0) ? _eq(r.patente||"") : "";
     var prBadge = (i===0 && r.preRegistrado) ? "<span style='background:#dcfce7;color:#166534;font-size:9px;font-weight:700;padding:1px 5px;border-radius:4px;margin-left:6px;'>Pre-registrado</span>" : "";
     html += "<div style='background:"+bgColor+";border-radius:8px;padding:10px;margin-bottom:8px;border-left:3px solid "+color+";'>"
       +"<div style='font-size:11px;font-weight:700;color:"+color+";margin-bottom:6px;'>"+label+prBadge+"</div>"
@@ -529,6 +592,9 @@ function abrirModalPaxFaltantes(reservaId){
       +"<input class='mpf-inp' placeholder='Nacionalidad' value='"+defaultPais+"' data-field='nac' data-idx='"+i+"'>"
       +"<input class='mpf-inp' placeholder='País residencia' value='"+defaultResid+"' data-field='resid' data-idx='"+i+"'>"
       +"<input class='mpf-inp' placeholder='Ciudad' value='"+defaultCiudad+"' data-field='ciudad' data-idx='"+i+"'>"
+      +(i===0 ? "<input class='mpf-inp' placeholder='Email' value='"+defaultEmail+"' data-field='email' data-idx='"+i+"'>" : "")
+      +(i===0 ? "<input class='mpf-inp' placeholder='Teléfono' value='"+defaultTel+"' data-field='telefono' data-idx='"+i+"'>" : "")
+      +(i===0 ? "<input class='mpf-inp' placeholder='Patente (opcional)' value='"+defaultPat+"' data-field='patente' data-idx='"+i+"' style='grid-column:span 2;'>" : "")
       +"</div></div>";
   }
   document.getElementById("mpfPasajeros").innerHTML = html;
@@ -545,7 +611,21 @@ function guardarPaxFaltantes(imprimir){
   var pasajeros = [];
   var getMpf=function(field,idx){var el=document.querySelector(".mpf-inp[data-field='"+field+"'][data-idx='"+idx+"']");return el?el.value.trim():"";};
   for(var i=0; i<paxTotal; i++){
-    pasajeros.push({nombre:getMpf("nombre",i)||r.nombre, doc:getMpf("doc",i)||"—", tipodoc:getMpf("tipodoc",i)||"Pasaporte", nac:getMpf("nac",i)||"—", resid:getMpf("resid",i)||"—", ciudad:getMpf("ciudad",i)||"—"});
+    var pax = {
+      nombre:  getMpf("nombre",i)||r.nombre,
+      doc:     getMpf("doc",i)||"—",
+      tipodoc: getMpf("tipodoc",i)||"Pasaporte",
+      nac:     getMpf("nac",i)||"—",
+      resid:   getMpf("resid",i)||"—",
+      ciudad:  getMpf("ciudad",i)||"—"
+    };
+    // Solo el titular tiene email/telefono/patente en el modal
+    if(i===0){
+      pax.email    = getMpf("email",0) || (r.email||"");
+      pax.telefono = getMpf("telefono",0) || "";
+      pax.patente  = getMpf("patente",0) || (r.patente||"");
+    }
+    pasajeros.push(pax);
   }
   _agregarReservaAINE(r, pasajeros);
   document.getElementById("modalPaxFaltantes").style.display = "none";
@@ -954,9 +1034,18 @@ function renderComparativaMeses(){
 const DEFAULT_HASH = "8ee84e1a4e66c16b0ef1fc392c570c8efc76bd1d8136db35e937abff4ad0cc75"; // "administracion"
 
 async function sha256(msg){
-  const buf = new TextEncoder().encode(msg);
-  const hash = await crypto.subtle.digest("SHA-256", buf);
-  return Array.from(new Uint8Array(hash)).map(x=>x.toString(16).padStart(2,"0")).join("");
+  try{
+    if(!crypto || !crypto.subtle) throw new Error("crypto.subtle no disponible (¿HTTP en vez de HTTPS?)");
+    const buf = new TextEncoder().encode(msg);
+    const hash = await crypto.subtle.digest("SHA-256", buf);
+    return Array.from(new Uint8Array(hash)).map(x=>x.toString(16).padStart(2,"0")).join("");
+  }catch(e){
+    console.error("sha256 fallback:", e);
+    // Fallback determinista (NO criptográfico) sólo para no romper auth en entornos inseguros
+    var s=String(msg||""), h1=0x811c9dc5, h2=0;
+    for(var i=0;i<s.length;i++){ var c=s.charCodeAt(i); h1=Math.imul(h1^c,16777619)>>>0; h2=((h2<<5)-h2+c)|0; }
+    return "fb_"+h1.toString(16).padStart(8,"0")+(h2>>>0).toString(16).padStart(8,"0");
+  }
 }
 
 function getClaveHash(){
@@ -998,9 +1087,10 @@ function cambiarPIN(){
 }
 
 // ── Usuarios Housekeeping ──
+// PIN inicial "0000" para primer ingreso — cada housekeeper debe cambiarlo después.
 const HK_USERS = [
-  {nombre:"Luisa", clave:"1026"},
-  {nombre:"Nacha", clave:"2026"}
+  {nombre:"Luisa", clave:"0000"},
+  {nombre:"Nacha", clave:"0000"}
 ];
 let hkUsuarioActual = null;
 let hkShowAllRooms = false;
@@ -1128,9 +1218,23 @@ function getAuditLog(){
   catch(e){ return []; }
 }
 function _saveAuditLog(arr){
-  // Mantener máximo 5000 entradas en local; el resto solo en Supabase
+  // Aviso preventivo a 4500 entradas (90% de capacidad)
+  if(arr.length === 4500 && typeof toast === "function"){
+    toast("📋 El registro de auditoría se acerca al límite (4500/5000). Considerá exportar un backup.", "warn", 8000);
+  }
+  // Mantener máximo 5000 entradas en local; archivar las más viejas antes de cortar
   if(arr.length > 5000){
+    var archivadas = arr.slice(0, arr.length - 5000);
     arr = arr.slice(-5000);
+    // Conservar resumen de lo archivado para no perder trazabilidad
+    try{
+      var resumen = JSON.parse(localStorage.getItem("hv_audit_archived_summary") || "{}");
+      resumen.totalArchivadas = (resumen.totalArchivadas || 0) + archivadas.length;
+      resumen.primeraArchivada = resumen.primeraArchivada || archivadas[0].timestamp;
+      resumen.ultimaArchivada  = archivadas[archivadas.length-1].timestamp;
+      resumen.lastArchivedAt = new Date().toISOString();
+      localStorage.setItem("hv_audit_archived_summary", JSON.stringify(resumen));
+    }catch(e){ console.warn("[audit archive summary]", e); }
   }
   safeSave("hv_audit", arr);
   if(typeof sbSet==="function") sbSet("hv_audit", arr);
@@ -1384,18 +1488,21 @@ async function crearUsuario(datos){
     return { ok:false, error:"Username ya existe" };
   }
   if(!ROLES_INFO[datos.rol]) return { ok:false, error:"Rol inválido" };
-  if(!datos.nombre || !datos.username || !datos.password || !datos.pin){
+  if(!datos.nombre || !datos.username || !datos.password){
     return { ok:false, error:"Datos incompletos" };
   }
-  if(!/^\d{4,6}$/.test(String(datos.pin))) return { ok:false, error:"PIN debe ser 4-6 dígitos" };
+  // PIN por defecto "0000" para primer ingreso. Si se pasa uno explícito, debe ser 4-6 dígitos.
+  var pinFinal = datos.pin ? String(datos.pin) : "0000";
+  var pinFueDefault = !datos.pin || pinFinal === "0000";
+  if(!/^\d{4,6}$/.test(pinFinal)) return { ok:false, error:"PIN debe ser 4-6 dígitos" };
   var newUser = {
     id: "u_" + Date.now() + "_" + Math.random().toString(36).slice(2,6),
     nombre: datos.nombre,
     username: datos.username,
     rol: datos.rol,
     passwordHash: await sha256(datos.password),
-    pinHash: await sha256(String(datos.pin)),
-    pinDefault: false,
+    pinHash: await sha256(pinFinal),
+    pinDefault: pinFueDefault, // true si PIN es "0000" — el usuario debe cambiarlo al 1er ingreso
     activo: true,
     createdAt: new Date().toISOString(),
     createdBy: currentUser ? currentUser.id : "system"
@@ -1457,6 +1564,47 @@ async function resetearPINUsuario(userId, newPin){
   return { ok:true };
 }
 
+// ── Resetear TODOS los PIN a "0000" (default de primer ingreso) ────────────
+// Solo dueño/gerente con permiso. Marca pinDefault:true en todos para forzar cambio al 1er ingreso.
+async function resetearTodosLosPINs(){
+  if(!canDo("gestionar_usuarios")) return { ok:false, error:"Sin permisos" };
+  var users = getUsers();
+  if(!users.length) return { ok:false, error:"No hay usuarios" };
+  var hash0000 = await sha256("0000");
+  var cambiados = 0;
+  users.forEach(function(u){
+    u.pinHash = hash0000;
+    u.pinDefault = true;
+    u.pinResetAt = new Date().toISOString();
+    cambiados++;
+  });
+  saveUsers(users);
+  await _logAudit("RESET_ALL_PINS", { type:"usuario", id:"ALL" }, null, { count:cambiados }, "Todos los PIN reseteados a 0000 (primer ingreso)", "high");
+  return { ok:true, count:cambiados };
+}
+
+// Wrapper UI: confirmación y toast. Llamar desde consola o botón de admin.
+function uiResetAllPINs(){
+  if(typeof showConfirm !== "function"){
+    if(!confirm("¿Resetear TODOS los PIN a 0000?")) return;
+    return resetearTodosLosPINs().then(function(r){
+      if(r.ok) (typeof toast==="function"?toast:alert)("PIN reseteado a 0000 para "+r.count+" usuarios","ok");
+      else (typeof toast==="function"?toast:alert)("Error: "+r.error,"err");
+    });
+  }
+  showConfirm(
+    "Resetear todos los PIN",
+    "Se pondrá el PIN a 0000 para TODOS los usuarios. Cada uno deberá cambiarlo en su primer ingreso. ¿Confirmas?",
+    function(){
+      resetearTodosLosPINs().then(function(r){
+        if(r.ok){ toast("PIN reseteado a 0000 para "+r.count+" usuarios","ok"); if(typeof _renderUsuariosModal==="function") _renderUsuariosModal(); }
+        else { toast("Error: "+r.error,"err"); }
+      }).catch(function(e){ toast("Error inesperado: "+(e&&e.message||e),"err"); });
+    },
+    "Resetear todos a 0000", true
+  );
+}
+
 // ── HELPERS UI ────────────────────────────────────────────────
 function rolBadgeHtml(rol){
   var info = ROLES_INFO[rol] || { label:rol, ico:"?", color:"#888" };
@@ -1504,7 +1652,10 @@ function _renderUsuariosModal(){
     + '<h2 style="margin:0;font-size:18px;font-family:var(--font-display);font-weight:700;letter-spacing:0.02em;">Gestión de usuarios</h2>'
     + '<button onclick="document.getElementById(\'usuariosModal\').remove()" style="background:none;border:none;font-size:24px;cursor:pointer;color:#888;">×</button>'
     + '</div>'
-    + '<button onclick="_uiCrearUsuario()" style="background:#3A2E1E;color:#FAF6F0;border:none;padding:10px 18px;border-radius:8px;font-weight:600;cursor:pointer;margin-bottom:16px;font-family:var(--font-body);font-size:12px;letter-spacing:0.03em;">Nuevo usuario</button>'
+    + '<div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;">'
+    + '<button onclick="_uiCrearUsuario()" style="background:#3A2E1E;color:#FAF6F0;border:none;padding:10px 18px;border-radius:8px;font-weight:600;cursor:pointer;font-family:var(--font-body);font-size:12px;letter-spacing:0.03em;">Nuevo usuario</button>'
+    + '<button onclick="uiResetAllPINs()" title="Resetea el PIN de TODOS los usuarios a 0000 (primer ingreso)" style="background:#C45C3E;color:#fff;border:none;padding:10px 18px;border-radius:8px;font-weight:600;cursor:pointer;font-family:var(--font-body);font-size:12px;letter-spacing:0.03em;">Resetear todos los PIN a 0000</button>'
+    + '</div>'
     + '<table style="width:100%;border-collapse:collapse;font-size:13px;"><thead><tr style="background:#FAF6F0;color:#3A2E1E;"><th style="padding:10px;text-align:left;">Usuario</th><th style="padding:10px;text-align:left;">Rol</th><th style="padding:10px;text-align:left;">Estado</th><th style="padding:10px;text-align:right;">Acciones</th></tr></thead><tbody>'+rows+'</tbody></table>'
     + '<div style="margin-top:16px;padding:12px;background:#FFF8E7;border-left:3px solid #D4A96A;font-size:11px;color:#7A5A2E;border-radius:4px;line-height:1.5;">Cada usuario tiene su propio password y PIN. El PIN se solicita para acciones críticas (eliminar reservas, modificar montos, vaciar papelera).</div>'
     + '</div>';
@@ -1521,13 +1672,19 @@ function _uiCrearUsuario(){
         if(!rol) return;
         showInput("Password (mín 4 caracteres):", "", function(password){
           if(!password) return;
-          showInput("PIN (4-6 dígitos):", "", function(pin){
-            if(!pin) return;
-            crearUsuario({ nombre:nombre, username:username.toLowerCase().trim(), rol:rol.toLowerCase().trim(), password:password, pin:pin }).then(function(res){
-              if(res.ok){ toast("Usuario creado: "+res.user.username,"ok"); _renderUsuariosModal(); }
-              else { toast("Error: "+res.error,"err"); }
-            }).catch(function(e){ toast("Error inesperado: "+(e&&e.message||e),"err"); });
-          }, "password");
+          // PIN inicial automático "0000" — el usuario debe cambiarlo al primer ingreso.
+          crearUsuario({
+            nombre: nombre,
+            username: username.toLowerCase().trim(),
+            rol: rol.toLowerCase().trim(),
+            password: password
+            // sin pin → default "0000" con pinDefault:true
+          }).then(function(res){
+            if(res.ok){
+              toast("Usuario creado: "+res.user.username+" · PIN inicial 0000 (cambiar al 1er ingreso)","ok");
+              _renderUsuariosModal();
+            } else { toast("Error: "+res.error,"err"); }
+          }).catch(function(e){ toast("Error inesperado: "+(e&&e.message||e),"err"); });
         }, "password");
       });
     });
@@ -2055,11 +2212,21 @@ window.addEventListener("DOMContentLoaded", function(){
   actualizarAlertaCheckin();
   setInterval(actualizarAlertaCheckin, 60000);
   // Auto-importar reservas del cuaderno en silencio al iniciar
-  // Only auto-import cuaderno if latest entry is still relevant (within 30 days)
+  // Throttle: máximo 1 vez cada 24 horas para no saturar el audit log si la app
+  // se abre/cierra muchas veces. Solo si el último cuaderno está vigente (<30d).
   var _lastCuad = RESERVAS_CUADERNO[RESERVAS_CUADERNO.length-1];
   if(_lastCuad){
     var _daysDiff = Math.round((new Date() - new Date(_lastCuad.checkout)) / 86400000);
-    if(_daysDiff < 30) setTimeout(function(){ try{ importarCuaderno(true); }catch(e){} }, 1200);
+    var _lastAutoImport = parseInt(localStorage.getItem("hv_last_auto_import_cuad")||"0", 10);
+    var _hoursSinceLast = (Date.now() - _lastAutoImport) / 3600000;
+    if(_daysDiff < 30 && _hoursSinceLast >= 24){
+      setTimeout(function(){
+        try{
+          importarCuaderno(true);
+          localStorage.setItem("hv_last_auto_import_cuad", String(Date.now()));
+        }catch(e){}
+      }, 1200);
+    }
   }
 });
 // ══════════════════════════════════════════════════════════════
@@ -2924,11 +3091,61 @@ table.reg tr:hover td{background:rgba(200,149,108,0.06);}
 .aseo-panel{box-shadow:0 2px 10px rgba(220,38,38,0.12);}
 .ls-box{box-shadow:0 24px 80px rgba(0,0,0,0.65);}
 
-@media(max-width:420px){
+/* ═══ HOUSEKEEPING MOBILE RESPONSIVE ═══ */
+@media(max-width:480px){
+  .hk-hdr{padding:10px 12px;}
+  .hk-hdr-logo{height:26px;}
+  .hk-stats{grid-template-columns:1fr 1fr 1fr;gap:7px;padding:12px 10px 6px;}
+  .hk-stat{padding:9px 6px;border-radius:10px;}
+  .hk-stat .hk-sv{font-size:22px;}
+  .hk-stat .hk-sl{font-size:9px;}
+  .hk-section{padding:4px 10px 2px;}
+  .hk-section-title{font-size:10px;}
+  .hk-room-card{padding:12px;border-radius:14px;}
+  .hk-room-num{font-size:24px;min-width:44px;}
+  .hk-room-card>div:first-child{gap:10px!important;flex-wrap:wrap;}
+  .hk-room-info{min-width:0;flex:1 1 auto;}
+  .hk-room-tipo{font-size:11px;}
+  .hk-room-sub{font-size:10px;}
+  .hk-action-btn{padding:9px 11px;font-size:11px;border-radius:9px;}
+  .hk-action-btn.act-ooo{padding:7px 9px;font-size:10px;}
+  .hk-clean-btn{padding:11px 14px;font-size:12px;}
+  .hk-supplies{grid-template-columns:1fr 1fr;gap:6px;}
+  .hk-supplies > *:nth-child(3):last-child{grid-column:1/-1;}
+  .hk-supply-item{padding:8px 9px;min-height:42px;}
+  .hk-supply-label{font-size:11px;}
+  .hk-supply-check{width:18px;height:18px;}
+  .hk-arrival-card{padding:12px;border-radius:14px;}
+  .hk-arrival-top{gap:10px;margin-bottom:8px;}
+  .hk-proact-section{padding:4px 10px 2px;}
+  .hk-proact-card{padding:12px 13px;border-radius:14px;gap:10px;}
+  .hk-proact-card .pc-ico{font-size:22px;}
+  .hk-proact-card .pc-titulo{font-size:12px;}
+  .hk-proact-card .pc-desc{font-size:10px;}
+  .hk-proact-mark{padding:8px 11px;font-size:11px;}
+  .hk-proact-fab{padding:10px 16px;font-size:12px;}
+  .hkcl-item{padding:9px 10px;}
+  .hkcl-label{font-size:12px;}
+  .hk-disc-header{padding:16px 18px;}
+  .hk-disc-header .dh-titulo{font-size:16px;}
+  .hk-disc-body{padding:16px 18px;}
+  .hk-disc-item .di-txt{font-size:12px;}
+}
+@media(max-width:360px){
   .hk-stats{grid-template-columns:1fr 1fr;}
   .hk-stat:last-child{grid-column:1/-1;}
-  .hk-room-num{font-size:24px;min-width:44px;}
-  .hk-clean-btn{padding:12px 14px;font-size:12px;}
+  .hk-stat .hk-sv{font-size:20px;}
+  .hk-room-num{font-size:22px;min-width:40px;}
+  .hk-room-card>div:first-child{gap:8px!important;}
+  .hk-action-btn{padding:8px 9px;font-size:10px;}
+  .hk-supplies{grid-template-columns:1fr 1fr;}
+  .hk-hdr-info .hk-nm{font-size:11px;}
+  .hk-hdr-info .hk-rol{font-size:9px;}
+}
+/* Action buttons group: wrap limpio en móvil */
+@media(max-width:480px){
+  .hk-room-card .hk-action-btn + .hk-action-btn,
+  .hk-room-card>div:first-child>div:last-child{flex-wrap:wrap;justify-content:flex-end;}
 }
 
 /* ═══ FECHA AMIGABLE ═══ */
@@ -3585,6 +3802,7 @@ table.disp tr:hover td.hab-cell-sucia{background:linear-gradient(90deg,#fecaca,#
 .print-doc .pd-badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:700;text-transform:uppercase;}
 .print-doc .pd-badge-ok{background:#d9f2e0;color:#2d5e3a;}
 .print-doc .pd-badge-warn{background:#fef3c7;color:#92400e;}
+.print-doc .pd-badge-err{background:#fde2e2;color:#991b1b;}
 .print-doc .pd-btn-bar{display:flex;gap:8px;justify-content:center;padding:16px 0;position:sticky;top:0;background:rgba(255,252,246,0.95);backdrop-filter:blur(8px);z-index:10;border-bottom:1px solid var(--b2);}
 .print-doc .pd-btn{padding:10px 24px;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;transition:all 0.2s;}
 .print-doc .pd-btn-print{background:linear-gradient(135deg,#3A2E1E,#D4A96A);color:#fff;box-shadow:0 2px 8px rgba(58,46,30,0.3);}
@@ -4504,8 +4722,12 @@ document.addEventListener('DOMContentLoaded',function(){
             <div class="db-fecha" id="ddFechaCo"></div>
           </div>
           <div class="date-noches">
-            <div class="dn-num" id="ddNoches">0</div>
-            <div class="dn-lbl" id="ddNochesLbl">noches</div>
+            <div class="dn-stepper" style="display:flex;align-items:center;justify-content:center;gap:6px;">
+              <button type="button" class="dn-btn" onclick="adjustNoches(-1)" title="Menos 1 noche" style="width:26px;height:26px;border-radius:6px;border:1px solid var(--b2);background:#fff;color:var(--mar);font-size:16px;font-weight:700;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;">−</button>
+              <input type="number" min="1" max="365" id="ddNoches" value="1" onchange="onNochesInput(this.value)" style="width:42px;text-align:center;font-size:18px;font-weight:800;color:var(--mar);border:none;background:transparent;padding:0;-moz-appearance:textfield;" inputmode="numeric">
+              <button type="button" class="dn-btn" onclick="adjustNoches(1)" title="Más 1 noche" style="width:26px;height:26px;border-radius:6px;border:1px solid var(--b2);background:#fff;color:var(--mar);font-size:16px;font-weight:700;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;">+</button>
+            </div>
+            <div class="dn-lbl" id="ddNochesLbl" style="text-align:center;">noches</div>
           </div>
         </div>
       </div>
@@ -4703,10 +4925,6 @@ document.addEventListener('DOMContentLoaded',function(){
       <input id="fNom" placeholder="Buscar nombre..." oninput="rTabla()" style="flex:1;min-width:120px;">
       <select id="fMes" oninput="rTabla()">
         <option value="">Todos los meses</option>
-        <option value="01">Enero</option><option value="02">Febrero</option><option value="03">Marzo</option>
-        <option value="04">Abril</option><option value="05">Mayo</option><option value="06">Junio</option>
-        <option value="07">Julio</option><option value="08">Agosto</option><option value="09">Septiembre</option>
-        <option value="10">Octubre</option><option value="11">Noviembre</option><option value="12">Diciembre</option>
       </select>
       <select id="fNac" oninput="rTabla()"><option value="">Todas las nac.</option></select>
     </div>
@@ -6137,7 +6355,18 @@ function getCleaningStats(){
 
 function fmtDia(s){const[y,m,d]=s.split("-");return `${parseInt(d)}/${parseInt(m)}`;}
 // fmtFC: formatea "YYYY-MM-DD" → "DD/MM/YYYY" sin riesgo de offset UTC
-function fmtFC(s){if(!s||s.length<10)return s||"—";const[y,m,d]=s.slice(0,10).split("-");return `${d}/${m}/${y}`;}
+function fmtFC(s){
+  if(!s||s.length<10) return s||"—";
+  const parts = s.slice(0,10).split("-");
+  if(parts.length!==3) return s;
+  const y=parseInt(parts[0],10), m=parseInt(parts[1],10), d=parseInt(parts[2],10);
+  // Validación: año razonable (2000-2100), mes 1-12, día 1-31
+  if(isNaN(y)||isNaN(m)||isNaN(d)||y<2000||y>2100||m<1||m>12||d<1||d>31) return s;
+  // Validación adicional: día válido para el mes (rechaza 31 de febrero, etc.)
+  const test = new Date(y, m-1, d);
+  if(test.getFullYear()!==y || test.getMonth()!==m-1 || test.getDate()!==d) return s;
+  return `${parts[2]}/${parts[1]}/${parts[0]}`;
+}
 // ══════════════════════════════
 // Wrapper seguro para localStorage.setItem — maneja quota exceeded
 function safeSave(key,data){
@@ -6880,19 +7109,63 @@ function updateDateDisplay(){
   const{i,o}=gF();
   const dd=document.getElementById("dateDisplay");
   if(!dd) return;
-  if(i&&o&&noches>0){
+  // Mostrar el bloque tan pronto el check-in esté seteado (aunque el check-out aún no).
+  if(i){
     dd.style.display="block";
-    const ci=fmtDateFriendly(i),co=fmtDateFriendly(o);
+    const ci=fmtDateFriendly(i);
     document.getElementById("ddDiaCi").textContent=ci.dia;
     document.getElementById("ddFechaCi").textContent=ci.fecha;
-    document.getElementById("ddDiaCo").textContent=co.dia;
-    document.getElementById("ddFechaCo").textContent=co.fecha;
-    document.getElementById("ddNoches").textContent=noches;
+    if(o){
+      const co=fmtDateFriendly(o);
+      document.getElementById("ddDiaCo").textContent=co.dia;
+      document.getElementById("ddFechaCo").textContent=co.fecha;
+    } else {
+      document.getElementById("ddDiaCo").textContent="—";
+      document.getElementById("ddFechaCo").textContent="(auto)";
+    }
+    const nochesEl=document.getElementById("ddNoches");
+    if(nochesEl && "value" in nochesEl) nochesEl.value = noches>0 ? noches : 1;
+    else if(nochesEl) nochesEl.textContent = noches>0 ? noches : 1;
     const nochesLbl=document.getElementById("ddNochesLbl");
     if(nochesLbl) nochesLbl.textContent=T[lang]?.ui_noches||"noches";
   } else {
     dd.style.display="none";
   }
+}
+
+// ── Stepper de noches: ajusta checkout = checkin + N ─────────────
+function _setCheckoutFromNoches(n){
+  const {i}=gF();
+  if(!i) { toast("Primero elige el check-in","info"); return false; }
+  const N = Math.max(1, Math.min(365, parseInt(n,10)||1));
+  const d = parseLocalDate(i);
+  d.setDate(d.getDate()+N);
+  const yy = d.getFullYear();
+  const mm = String(d.getMonth()+1).padStart(2,"0");
+  const dd = String(d.getDate()).padStart(2,"0");
+  const iso = `${yy}-${mm}-${dd}`;
+  const hidden = document.getElementById("fOut");
+  if(hidden) hidden.value = iso;
+  // Actualizar los inputs DD/MM/AAAA del checkout
+  const dEl=document.getElementById("fOut_d");
+  const mEl=document.getElementById("fOut_m");
+  const yEl=document.getElementById("fOut_y");
+  if(dEl) dEl.value = parseInt(dd);
+  if(mEl) mEl.value = parseInt(mm);
+  if(yEl) yEl.value = yy;
+  noches = N;
+  calcN();
+  return true;
+}
+function adjustNoches(delta){
+  const actual = Math.max(1, parseInt(noches,10)||1);
+  const nuevo = Math.max(1, Math.min(365, actual + delta));
+  if(nuevo === actual && delta<0) return;
+  _setCheckoutFromNoches(nuevo);
+}
+function onNochesInput(v){
+  const n = Math.max(1, Math.min(365, parseInt(v,10)||1));
+  _setCheckoutFromNoches(n);
 }
 
 function calcN(){
@@ -7453,7 +7726,14 @@ function rDisp(){
         const esIni=bk.checkin===d;
         const nm=_esc(bk.nombre.length>8?bk.nombre.slice(0,8)+"…":bk.nombre);
         const bkPreBadge=bk.preRegistrado?`<span class="prereg-badge prereg-ok">✓ pre-reg</span>`:"";
-        const tip=`<span class="tip"><span class="tip-src tip-src-bk">Booking.com</span><br><b>${_esc(bk.nombre)}</b>${bk.pax?" · "+bk.pax+" pax":""}${bk.numReserva?"<br>Res: "+_esc(bk.numReserva):""}<br>${fmtFC(bk.checkin)} → ${fmtFC(bk.checkout)} · ${bk.noches}n${bk.precio?"<br>"+_esc(bk.precio):""}${bk.pais?" · "+_esc(bk.pais):""}${bk.preRegistrado?"<br>✓ Pre-registrado":""}</span>`;
+        // Precio normalizado: si es número o string, lo convertimos a "$X.XXX"; si es NaN/inválido, omitimos
+        const _bkPrecioFmt = (function(p){
+          if(p===undefined||p===null||p==="") return "";
+          const n = parseFloat(String(p).replace(/\./g,"").replace(/,/g,".").replace(/[^\d.]/g,""));
+          if(!isNaN(n) && n>0) return "$"+Math.round(n).toLocaleString("es-CL");
+          return _esc(String(p));
+        })(bk.precio);
+        const tip=`<span class="tip"><span class="tip-src tip-src-bk">Booking.com</span><br><b>${_esc(bk.nombre)}</b>${bk.pax?" · "+bk.pax+" pax":""}${bk.numReserva?"<br>Res: "+_esc(bk.numReserva):""}<br>${fmtFC(bk.checkin)} → ${fmtFC(bk.checkout)} · ${bk.noches}n${_bkPrecioFmt?"<br>"+_bkPrecioFmt:""}${bk.pais?" · "+_esc(bk.pais):""}${bk.preRegistrado?"<br>✓ Pre-registrado":""}</span>`;
         html+=`<td class="cel-bk cel-tip${esIni?" cel-bk-ini":""}${hoyCls}" style="background:${BK_COLORS_SOFT.bg};color:${BK_COLORS_SOFT.fg};border-left:${esIni?"3px solid #3b82f6":"none"};cursor:pointer;${_wb14}" onclick="verBK('${bk.id}')">${esIni?`<span style="font-size:8px;">${nm}</span>${bkPreBadge}`:"&nbsp;"}${tip}</td>`;
       }else if(noReady&&d===HOY){
         const stI=ROOM_STATES[roomSt]||ROOM_STATES.dirty;
@@ -7665,10 +7945,10 @@ function verR(id){
         <div style="display:flex;justify-content:space-between;"><span style="color:#666;">📅 Check-out</span><strong>${fmtFC(r.checkout)}</strong></div>
         ${r.telefono?`<div style="display:flex;justify-content:space-between;"><span style="color:#666;">📞 Teléfono</span><strong style="color:#0f6e56;">${esc(r.telefono)}</strong></div>`:""}
         ${r.precio?`<div style="display:flex;justify-content:space-between;"><span style="color:#666;">💰 Precio</span><strong style="color:#b45309;">${(function(p){const n=parseFloat(String(p).replace(/\./g,'').replace(/,/g,'.').replace(/[^\d.]/g,''));return n>0?fmt2(n):p;})(r.precio)}</strong></div>`:""}
-        ${r.medio?`<div style="display:flex;justify-content:space-between;"><span style="color:#666;">📡 Canal</span><strong>${r.medio}</strong></div>`:""}
-        ${r.patente?`<div style="display:flex;justify-content:space-between;"><span style="color:#666;">🚗 Patente</span><strong>${r.patente}</strong></div>`:""}
+        ${r.medio?`<div style="display:flex;justify-content:space-between;"><span style="color:#666;">📡 Canal</span><strong>${esc(r.medio)}</strong></div>`:""}
+        ${r.patente?`<div style="display:flex;justify-content:space-between;"><span style="color:#666;">🚗 Patente</span><strong>${esc(r.patente)}</strong></div>`:""}
         <div style="display:flex;justify-content:space-between;"><span style="color:#666;">${docIco} Documento</span><strong>${doc.charAt(0).toUpperCase()+doc.slice(1)}</strong></div>
-        ${r.nDocumento?`<div style="display:flex;justify-content:space-between;"><span style="color:#666;">📋 N° Documento</span><strong style="color:#1e40af;">${r.nDocumento}</strong></div>`:""}
+        ${r.nDocumento?`<div style="display:flex;justify-content:space-between;"><span style="color:#666;">📋 N° Documento</span><strong style="color:#1e40af;">${esc(r.nDocumento)}</strong></div>`:""}
         ${r.metodoPago?`<div style="display:flex;justify-content:space-between;"><span style="color:#666;">💳 Método pago</span><strong>${esc(r.metodoPago)}</strong></div>`:""}
         ${r.notas?`<div style="display:flex;justify-content:space-between;"><span style="color:#666;">📝 Notas</span><span style="color:#555;text-align:right;max-width:180px;">${esc(r.notas)}</span></div>`:""}
       </div>
@@ -7754,10 +8034,10 @@ function verBK(id){
         <div style="display:flex;justify-content:space-between;"><span style="color:#666;">📅 Check-in</span><strong>${fmtFC(bk.checkin)}</strong></div>
         <div style="display:flex;justify-content:space-between;"><span style="color:#666;">📅 Check-out</span><strong>${fmtFC(bk.checkout)}</strong></div>
         ${bk.telefono?`<div style="display:flex;justify-content:space-between;"><span style="color:#666;">📞 Teléfono</span><strong style="color:#0f6e56;">${esc(bk.telefono)}</strong></div>`:""}
-        ${bk.numReserva?`<div style="display:flex;justify-content:space-between;"><span style="color:#666;">🔖 N° Reserva</span><strong style="color:#1e40af;">${bk.numReserva}</strong></div>`:""}
+        ${bk.numReserva?`<div style="display:flex;justify-content:space-between;"><span style="color:#666;">🔖 N° Reserva</span><strong style="color:#1e40af;">${esc(bk.numReserva)}</strong></div>`:""}
         ${bk.precio?`<div style="display:flex;justify-content:space-between;"><span style="color:#666;">💰 Precio</span><strong style="color:#b45309;">${(function(p){const n=parseFloat(String(p).replace(/\./g,'').replace(/,/g,'.').replace(/[^\d.]/g,''));return n>0?fmt2(n):p;})(bk.precio)}</strong></div>`:""}
-        ${bk.pais?`<div style="display:flex;justify-content:space-between;"><span style="color:#666;">🌍 País</span><strong>${bk.pais}</strong></div>`:""}
-        ${bk.docType?`<div style="display:flex;justify-content:space-between;"><span style="color:#666;">🧾 Documento</span><strong>${{"boleta":"Boleta","factura":"Factura","exento":"Exento (turista)"}[bk.docType]||bk.docType}</strong></div>`:""}
+        ${bk.pais?`<div style="display:flex;justify-content:space-between;"><span style="color:#666;">🌍 País</span><strong>${esc(bk.pais)}</strong></div>`:""}
+        ${bk.docType?`<div style="display:flex;justify-content:space-between;"><span style="color:#666;">🧾 Documento</span><strong>${{"boleta":"Boleta","factura":"Factura","exento":"Exento (turista)"}[bk.docType]||esc(bk.docType)}</strong></div>`:""}
         ${bk.metodoPago?`<div style="display:flex;justify-content:space-between;"><span style="color:#666;">💳 Método pago</span><strong>${esc(bk.metodoPago)}</strong></div>`:""}
         ${bk.notas?`<div style="display:flex;justify-content:space-between;"><span style="color:#666;">📝 Notas</span><span style="color:#555;text-align:right;max-width:200px;">${esc(bk.notas)}</span></div>`:""}
       </div>
@@ -8393,14 +8673,26 @@ function hkShowReasignar(rn){
 // ══════════════════════════════════════════════════════════════
 
 // Rate-limiter básico: máximo 10 envíos por token en 15 minutos
-var _preRegAttempts = {}; // {token: [{ts},...]}
+// PERSISTE en localStorage para que un atacante no pueda resetear refrescando la página.
 function _preRegRateOk(token){
   var now = Date.now();
   var window15 = 15 * 60 * 1000;
-  if(!_preRegAttempts[token]) _preRegAttempts[token] = [];
-  _preRegAttempts[token] = _preRegAttempts[token].filter(function(t){ return now - t < window15; });
-  if(_preRegAttempts[token].length >= 10) return false;
-  _preRegAttempts[token].push(now);
+  var KEY = "hv_prereg_attempts";
+  var all = {};
+  try{ all = JSON.parse(localStorage.getItem(KEY) || "{}") || {}; }catch(e){ all = {}; }
+  if(!Array.isArray(all[token])) all[token] = [];
+  // Filtrar intentos viejos (>15min)
+  all[token] = all[token].filter(function(t){ return now - t < window15; });
+  // Limpieza global: eliminar tokens sin intentos vigentes
+  Object.keys(all).forEach(function(k){
+    if(!Array.isArray(all[k]) || all[k].length === 0) delete all[k];
+  });
+  if(all[token].length >= 10){
+    safeSave(KEY, all);
+    return false;
+  }
+  all[token].push(now);
+  safeSave(KEY, all);
   return true;
 }
 
@@ -8522,12 +8814,33 @@ function copiarLinkPreRegistro(reservaId, fuente, btnEl){
     token = generarPreRegistroToken(reservaId, fuente);
   }
   var url = getPreRegistroURL(token);
-  navigator.clipboard.writeText(url).then(function(){
+  function _copyFallback(text){
+    // Fallback con textarea oculto + execCommand("copy")
+    try{
+      var ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.cssText = "position:fixed;top:-9999px;left:-9999px;opacity:0;";
+      document.body.appendChild(ta);
+      ta.select();
+      ta.setSelectionRange(0, text.length);
+      var ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      return ok;
+    }catch(e){ return false; }
+  }
+  function _copyOk(){
     toast("Link de pre-registro copiado","ok",3000);
     if(btnEl){ btnEl.textContent = "Copiado!"; setTimeout(function(){ btnEl.textContent = "Pre-registro"; }, 2000); }
-  }).catch(function(){
-    prompt("Copia este link:", url);
-  });
+  }
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(url).then(_copyOk).catch(function(){
+      if(_copyFallback(url)) _copyOk();
+      else toast("No se pudo copiar el link. Copialo manualmente: " + url, "warn", 8000);
+    });
+  } else {
+    if(_copyFallback(url)) _copyOk();
+    else toast("No se pudo copiar el link. Copialo manualmente: " + url, "warn", 8000);
+  }
 }
 
 // ── Hash router: detectar #/pre-registro/{token} ──
@@ -9077,7 +9390,7 @@ function renderBKList(reservas){
     const esCanc=r.cancelada||false;
     const rowSt=esCanc?"background:#fff0f0;opacity:.75;":"";
     const precioStr=r.precio?(function(p){const n=parseFloat(String(p).replace(/\./g,"").replace(/,/g,".").replace(/[^\d.]/g,""));return n>0?"$"+Math.round(n).toLocaleString("es-CL"):String(p);})(r.precio):"";
-    const numRes=r.numReserva?`<br><span style="font-size:9px;color:#999;">#${r.numReserva}</span>`:"";
+    const numRes=r.numReserva?`<br><span style="font-size:9px;color:#999;">#${esc(r.numReserva)}</span>`:"";
     return `<tr style="cursor:pointer;${rowSt}" onclick="verBK('${r.id}')">
       <td><strong>${esc(r.nombre)}</strong>${esCanc?' <span style="color:#b91c1c;font-size:9px;">[CANCELADA]</span>':""}${numRes}</td>
       <td>${fmtFC(r.checkin)}</td>
@@ -9161,20 +9474,47 @@ function restaurarBKList(){
 // ══════════════════════════════
 function getReg(){try{return JSON.parse(localStorage.getItem("hv_registros")||"[]");}catch(e){return[];}}
 
+// Estado colapsado de meses en INE (se preserva entre re-renders)
+window._ineMesesColapsados = window._ineMesesColapsados || {};
+function toggleINEMes(ym){
+  window._ineMesesColapsados[ym] = !window._ineMesesColapsados[ym];
+  rTabla();
+}
 function rTabla(){
   const reg=getReg();
   const fn=document.getElementById("fNom")?.value.toLowerCase()||"";
   const fm=document.getElementById("fMes")?.value||"";
   const fnac=document.getElementById("fNac")?.value||"";
+
+  // --- Poblar select de nacionalidad (igual que antes) ---
   const nacs=[...new Set(reg.map(r=>r.nacionalidad).filter(n=>n&&n!=="—"))].sort();
   const sel=document.getElementById("fNac"),cur=sel.value;
   sel.innerHTML=`<option value="">Todas las nac.</option>`+nacs.map(n=>`<option value="${n}"${n===cur?" selected":""}>${n}</option>`).join("");
+
+  // --- Poblar select de mes dinámicamente (YYYY-MM presentes en los datos) ---
+  const _mesNombre = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+  const yms = [...new Set(reg.map(r=>(r.checkin||"").slice(0,7)).filter(s=>s.length===7))].sort((a,b)=>b.localeCompare(a));
+  const selMes=document.getElementById("fMes"), curMes=selMes.value;
+  selMes.innerHTML = `<option value="">Todos los meses</option>` + yms.map(ym=>{
+    const [y,m] = ym.split("-");
+    const label = _mesNombre[parseInt(m,10)-1] + " " + y;
+    return `<option value="${ym}"${ym===curMes?" selected":""}>${label}</option>`;
+  }).join("");
+
+  // --- Filtrar (fm puede ser "YYYY-MM" nuevo o "MM" legacy) ---
   let f=reg.filter(r=>{
     if(fn&&!(r.nombre||"").toLowerCase().includes(fn)&&!(r.doc||"").toLowerCase().includes(fn)&&!(r.habitacion||"").toLowerCase().includes(fn))return false;
-    if(fm&&r.checkin?.slice(5,7)!==fm)return false;
+    if(fm){
+      const ciYM = (r.checkin||"").slice(0,7);
+      const ciMM = (r.checkin||"").slice(5,7);
+      if(fm.length===7){ if(ciYM!==fm) return false; }
+      else { if(ciMM!==fm) return false; }
+    }
     if(fnac&&r.nacionalidad!==fnac)return false;
     return true;
   }).sort((a,b)=>(b.checkin||"").localeCompare(a.checkin||""));
+
+  // --- Stats ---
   const mes=hoyISO().slice(0,7);
   const em=reg.filter(r=>r.checkin?.startsWith(mes)).length;
   const nc=[...new Set(reg.map(r=>r.nacionalidad))].filter(n=>n&&n!=="—").length;
@@ -9184,24 +9524,62 @@ function rTabla(){
     <div class="sc"><div class="sn">${em}</div><div class="sl">Este mes</div></div>
     <div class="sc"><div class="sn">${nc}</div><div class="sl">Nacionalidades</div></div>
     <div class="sc"><div class="sn">${resTotal}</div><div class="sl">Reservas únicas</div></div>`;
+
+  // --- Render agrupado por mes con cabeceras colapsables ---
   const tb=document.getElementById("tBody");
   if(!f.length){tb.innerHTML=`<tr><td colspan="14" class="es">No hay registros aún.<br>Guarda una reserva confirmada desde Cotización.</td></tr>`;return;}
-  tb.innerHTML=f.map((r,i)=>`<tr>
-    <td>${i+1}</td>
-    <td><strong>${esc(r.nombre)}</strong><br><span style="font-size:10px;color:var(--t3);">${esc(r.doc)} (${esc(r.tipodoc)})</span>${r.tipodoc==="RUT"&&r.doc&&r.doc!=="—"&&!validarRUT(r.doc)?'<span style="color:#b91c1c;font-size:9px;"> ⚠ RUT inválido</span>':""}</td>
-    <td><span class="bdg ${r.tipodoc==="RUT"?"bdg-cl":"bdg-ext"}">${esc(r.nacionalidad)||"—"}</span></td>
-    <td>${esc(r.residencia)||"—"}</td>
-    <td>${esc(r.ciudad)||"—"}</td>
-    <td style="white-space:nowrap;">${fmtFC(r.checkin)}</td>
-    <td style="white-space:nowrap;">${fmtFC(r.checkout)||"—"}</td>
-    <td>${r.noches}</td>
-    <td>${r.totalPax||"—"}</td>
-    <td>${esc(r.telefono)||"—"}</td>
-    <td>${esc(r.medio)||"—"}</td>
-    <td>${r.patente&&r.patente!=="—"?`<strong>${esc(r.patente)}</strong>`:"—"}</td>
-    <td>${esc(r.habitacion)}</td>
-    <td><button class="dr2" onclick="delReg('${r.id}')">✕</button></td>
-  </tr>`).join("");
+
+  // Agrupar por YYYY-MM
+  const grupos = {};
+  f.forEach(r=>{
+    const ym = (r.checkin||"sin-fecha").slice(0,7);
+    if(!grupos[ym]) grupos[ym] = [];
+    grupos[ym].push(r);
+  });
+  // Orden de claves (más reciente primero)
+  const clavesOrd = Object.keys(grupos).sort((a,b)=>b.localeCompare(a));
+
+  // Render
+  let html = "";
+  let idxGlobal = 0;
+  clavesOrd.forEach(ym=>{
+    const registros = grupos[ym];
+    const [yy,mm] = ym.split("-");
+    const labelMes = (mm && yy) ? (_mesNombre[parseInt(mm,10)-1] + " " + yy) : "Sin fecha";
+    const colapsado = !!window._ineMesesColapsados[ym];
+    const chevron = colapsado ? "▸" : "▾";
+    const pax = registros.length;
+    const reservas = [...new Set(registros.map(r=>r.bookingId||r.habitacion+"_"+r.checkin))].length;
+    html += `<tr class="ine-mes-hdr" style="background:linear-gradient(90deg,#f8f4ec,#fdfbf5);cursor:pointer;border-top:2px solid #c8956c;" onclick="toggleINEMes('${ym}')">
+      <td colspan="14" style="padding:8px 12px;font-weight:700;color:#5c3d1e;font-size:13px;">
+        <span style="display:inline-block;width:14px;">${chevron}</span>
+        ${esc(labelMes)}
+        <span style="float:right;font-weight:500;color:#8a6b3d;font-size:11px;">${pax} pasajero${pax!==1?"s":""} · ${reservas} reserva${reservas!==1?"s":""}</span>
+      </td>
+    </tr>`;
+    if(!colapsado){
+      html += registros.map(r=>{
+        idxGlobal++;
+        return `<tr>
+          <td>${idxGlobal}</td>
+          <td><strong>${esc(r.nombre)}</strong><br><span style="font-size:10px;color:var(--t3);">${esc(r.doc)} (${esc(r.tipodoc)})</span>${r.tipodoc==="RUT"&&r.doc&&r.doc!=="—"&&!validarRUT(r.doc)?'<span style="color:#b91c1c;font-size:9px;"> ⚠ RUT inválido</span>':""}</td>
+          <td><span class="bdg ${r.tipodoc==="RUT"?"bdg-cl":"bdg-ext"}">${esc(r.nacionalidad)||"—"}</span></td>
+          <td>${esc(r.residencia)||"—"}</td>
+          <td>${esc(r.ciudad)||"—"}</td>
+          <td style="white-space:nowrap;">${fmtFC(r.checkin)}</td>
+          <td style="white-space:nowrap;">${fmtFC(r.checkout)||"—"}</td>
+          <td>${r.noches}</td>
+          <td>${r.totalPax||"—"}</td>
+          <td>${esc(r.telefono)||"—"}</td>
+          <td>${esc(r.medio)||"—"}</td>
+          <td>${r.patente&&r.patente!=="—"?`<strong>${esc(r.patente)}</strong>`:"—"}</td>
+          <td>${esc(r.habitacion)}</td>
+          <td><button class="dr2" onclick="delReg('${r.id}')">✕</button></td>
+        </tr>`;
+      }).join("");
+    }
+  });
+  tb.innerHTML = html;
 }
 
 function delReg(id){
@@ -10471,6 +10849,22 @@ function onDatePartInput(fieldId){
     const diasEnMes=new Date(yy,mm,0).getDate(); if(dd>=1&&dd<=diasEnMes&&mm>=1&&mm<=12&&yy>=2020){
       const iso=`${yy}-${String(mm).padStart(2,"0")}-${String(dd).padStart(2,"0")}`;
       hidden.value=iso;
+      // Si el usuario completó el check-in y aún no hay check-out, lo auto-setea a +1 día
+      // (usa el stepper de noches si quiere cambiarlo). Solo aplica para fIn.
+      if(fieldId==="fIn"){
+        const fOutHidden=document.getElementById("fOut");
+        if(fOutHidden && !fOutHidden.value){
+          const _dt=parseLocalDate(iso); _dt.setDate(_dt.getDate()+1);
+          const _yy=_dt.getFullYear(), _mm=String(_dt.getMonth()+1).padStart(2,"0"), _dd=String(_dt.getDate()).padStart(2,"0");
+          fOutHidden.value = `${_yy}-${_mm}-${_dd}`;
+          const dOut=document.getElementById("fOut_d");
+          const mOut=document.getElementById("fOut_m");
+          const yOut=document.getElementById("fOut_y");
+          if(dOut) dOut.value=parseInt(_dd);
+          if(mOut) mOut.value=parseInt(_mm);
+          if(yOut) yOut.value=_yy;
+        }
+      }
       calcN();
       return;
     }
@@ -10526,6 +10920,12 @@ function closePapelera(){
   if(modal) modal.style.display = "none";
 }
 
+// Estado colapsado de meses en Papelera
+window._papMesesColapsados = window._papMesesColapsados || {};
+function togglePapMes(ym){
+  window._papMesesColapsados[ym] = !window._papMesesColapsados[ym];
+  renderPapeleraBody();
+}
 function renderPapeleraBody(){
   const items = getPapelera();
   const body = document.getElementById("papeleraBody");
@@ -10540,7 +10940,26 @@ function renderPapeleraBody(){
   }
   const docIco={"boleta":"🧾","factura":"📄","exento":"✈️"};
   const docLbl={"boleta":"Boleta","factura":"Factura","exento":"Exento IVA"};
-  body.innerHTML = items.map((r,idx)=>{
+  const _mesNombrePap = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+
+  // Adjuntar idx original y agrupar por mes de eliminación (YYYY-MM)
+  const itemsIdx = items.map((r,idx)=>({r, idx}));
+  const grupos = {};
+  itemsIdx.forEach(it=>{
+    const d = it.r.deletedAt || it.r.eliminadoEn || "";
+    const ym = d ? d.slice(0,7) : "sin-fecha";
+    if(!grupos[ym]) grupos[ym] = [];
+    grupos[ym].push(it);
+  });
+  // Orden: más reciente primero, "sin-fecha" al final
+  const clavesOrd = Object.keys(grupos).sort((a,b)=>{
+    if(a==="sin-fecha") return 1;
+    if(b==="sin-fecha") return -1;
+    return b.localeCompare(a);
+  });
+
+  // Renderer de un item
+  const renderItem = (r, idx)=>{
     const bgColor = roomColor(r.roomNum).bg || "#5c3d1e";
     const deletedDate = r.deletedAt||r.eliminadoEn;
     const fechaEl = deletedDate ? `<div style="color:#dc2626;font-size:10px;">🗑 Eliminada: ${fmtFC(deletedDate.slice(0,10))}</div>` : "";
@@ -10583,7 +11002,31 @@ function renderPapeleraBody(){
         <button onclick="eliminarDefinitivo(${idx})" style="padding:5px 10px;background:transparent;color:#dc2626;border:1px solid #fca5a5;border-radius:7px;cursor:pointer;font-size:11px;font-weight:600;">✕ Borrar</button>
       </div>
     </div>`;
-  }).join("");
+  };
+
+  // Render agrupado por mes de eliminación con headers colapsables
+  let html = "";
+  clavesOrd.forEach(ym=>{
+    const grupo = grupos[ym];
+    let labelMes;
+    if(ym === "sin-fecha"){
+      labelMes = "Sin fecha de eliminación";
+    } else {
+      const [yy,mm] = ym.split("-");
+      labelMes = _mesNombrePap[parseInt(mm,10)-1] + " " + yy;
+    }
+    const colapsado = !!window._papMesesColapsados[ym];
+    const chevron = colapsado ? "▸" : "▾";
+    html += `<div style="margin:10px 0 4px;padding:8px 12px;background:linear-gradient(90deg,#fdf3e3,#fffaf0);border-left:3px solid #c8956c;border-radius:6px;cursor:pointer;font-size:12px;font-weight:700;color:#5c3d1e;" onclick="togglePapMes('${ym}')">
+      <span style="display:inline-block;width:14px;">${chevron}</span>
+      🗑 ${esc(labelMes)}
+      <span style="float:right;font-weight:500;color:#8a6b3d;font-size:11px;">${grupo.length} elemento${grupo.length!==1?"s":""}</span>
+    </div>`;
+    if(!colapsado){
+      html += grupo.map(it=>renderItem(it.r, it.idx)).join("");
+    }
+  });
+  body.innerHTML = html;
 }
 
 function restaurarReserva(idx){
@@ -10720,12 +11163,48 @@ function _fmtDatePrint(iso){
   return p.length===3? p[2]+"/"+p[1]+"/"+p[0] : iso;
 }
 
-// Genera la cabecera estándar para documentos impresos
+// ── LOGO HLV: cache único leído desde el DOM ──
+// Todas las cabeceras impresas usan la misma fuente de verdad.
+var LOGO_HLV_DATAURL = "";
+function _getLogoHLV(){
+  if(LOGO_HLV_DATAURL) return LOGO_HLV_DATAURL;
+  try{
+    var candidatos = document.querySelectorAll('img.hdr-logo, img.ls-form-logo, img.hk-hdr-logo');
+    for(var i=0;i<candidatos.length;i++){
+      var s = candidatos[i].getAttribute('src')||'';
+      if(s.indexOf('data:image')===0 || /\.(png|jpe?g|svg|webp)(\?|$)/i.test(s)){
+        LOGO_HLV_DATAURL = s;
+        return LOGO_HLV_DATAURL;
+      }
+    }
+  }catch(e){}
+  return "";
+}
+
+// Genera la cabecera estándar para documentos impresos (logo + título + subtítulo)
+// Si hay logo disponible lo usa; si no, cae a marca textual con estrellas.
 function _printHeader(titulo, subtitulo){
-  return '<div class="pd-header">'+
-    '<div style="font-size:11px;font-weight:700;letter-spacing:0.1em;color:#D4A96A;">HOTEL LAS VICUÑAS</div>'+
-    '<h1>'+titulo+'</h1>'+
-    '<div class="pd-sub">Putre, Arica y Parinacota · Chile · 3.500 msnm'+(subtitulo?' · '+subtitulo:'')+'</div>'+
+  var logo = _getLogoHLV();
+  var brand = logo
+    ? '<img src="'+logo+'" alt="Hotel Las Vicuñas" style="height:52px;width:auto;margin-bottom:6px;display:inline-block;" />'
+    : '<div style="font-size:11px;font-weight:700;letter-spacing:0.1em;color:#D4A96A;">HOTEL LAS VICUÑAS ★★★</div>';
+  return '<div class="pd-header" style="text-align:center;padding-bottom:10px;border-bottom:2px solid #D4A96A;margin-bottom:14px;">'+
+    brand+
+    '<h1 style="font-family:serif;font-size:22px;font-weight:900;margin:6px 0 4px;color:#3A2E1E;letter-spacing:0.02em;">'+titulo+'</h1>'+
+    '<div class="pd-sub" style="font-size:10.5px;color:#888;letter-spacing:0.05em;">Putre, Arica y Parinacota · Chile · 3.500 msnm'+(subtitulo?' · '+subtitulo:'')+'</div>'+
+  '</div>';
+}
+
+// Cabecera compacta para fichas con mucho contenido (grupal)
+function _printHeaderCompact(titulo){
+  var logo = _getLogoHLV();
+  var brand = logo
+    ? '<img src="'+logo+'" alt="HLV" style="height:38px;width:auto;" />'
+    : '<div style="font-size:10px;letter-spacing:0.1em;color:#666;">HOTEL<br><b style="font-size:16px;font-family:serif;color:#3A2E1E;">LAS VICUÑAS ★★★</b></div>';
+  return '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;padding-bottom:8px;border-bottom:2.5px solid #D4A96A;gap:10px;">'+
+    '<div>'+brand+'</div>'+
+    '<div style="text-align:center;flex:1;"><div style="font-size:14px;font-weight:900;font-family:serif;letter-spacing:0.05em;color:#3A2E1E;">'+titulo+'</div></div>'+
+    '<div style="text-align:right;font-size:10px;color:#666;">Fecha: '+_fmtDatePrint(hoyISO())+'</div>'+
   '</div>';
 }
 
@@ -10743,64 +11222,215 @@ function closePrintDoc(){
   if(el){el.style.display="none";el.innerHTML="";}
 }
 
+// ╔══════════════════════════════════════════════════════════════╗
+// ║  HELPERS DE AUTOCOMPLETADO DE FICHAS (Individual/Grupal/Conf)║
+// ╚══════════════════════════════════════════════════════════════╝
+
+// Limpia sentinelas ("—", "-", "?", "n/a") y espacios
+function _fichaClean(v){
+  if(v===undefined||v===null) return "";
+  var s=String(v).trim();
+  if(!s) return "";
+  var low=s.toLowerCase();
+  if(s==="—"||s==="-"||s==="?"||low==="n/a"||low==="na"||low==="null"||low==="undefined") return "";
+  return s;
+}
+
+// Separa "Nombre(s) Apellido(s)" de forma latam-aware.
+// - Pasaporte/DNI: último token es apellido (los extranjeros suelen tener 1 apellido).
+// - RUT/chileno: 2 últimos tokens son apellidos, salvo que sólo haya 2 palabras (1+1).
+function _fichaSplitNombre(nombreRaw, tipodoc){
+  var nom=_fichaClean(nombreRaw);
+  if(!nom) return {nombres:"",apellidos:""};
+  // Limpia múltiples espacios
+  var tokens=nom.split(/\s+/).filter(Boolean);
+  if(tokens.length===1) return {nombres:tokens[0],apellidos:""};
+  if(tokens.length===2) return {nombres:tokens[0],apellidos:tokens[1]};
+  var esExt=(tipodoc==="Pasaporte"||tipodoc==="DNI");
+  var nApe=esExt?1:2;
+  var nombres=tokens.slice(0,tokens.length-nApe).join(" ");
+  var apellidos=tokens.slice(tokens.length-nApe).join(" ");
+  return {nombres:nombres,apellidos:apellidos};
+}
+
+// Formatea precio crudo a "$X.XXX" (acepta números y strings con puntos/comas)
+function _fichaFmtPrecio(p){
+  if(p===undefined||p===null||p==="") return "";
+  var s=String(p).replace(/[^0-9]/g,"");
+  if(!s) return "";
+  var n=parseInt(s,10);
+  if(isNaN(n)||n<=0) return "";
+  return "$"+n.toLocaleString("es-CL");
+}
+
+// Capitaliza tipo de habitación
+function _fichaCapTipo(t){
+  var s=_fichaClean(t);
+  if(!s) return "";
+  return s.charAt(0).toUpperCase()+s.slice(1).toLowerCase();
+}
+
+// Detecta flags de método de pago desde texto libre
+function _fichaMetodoPagoFlags(mp){
+  var s=_fichaClean(mp).toLowerCase();
+  var transfer=/transfer|transferencia|depos|banco/.test(s);
+  var contado=/contado|efectivo|cash|caja/.test(s);
+  var tarjeta=/tarjeta|débito|debito|crédito|credito|pos|webpay|card/.test(s);
+  var otro=s && !transfer && !contado && !tarjeta;
+  return {transfer:transfer,contado:contado,tarjeta:tarjeta,otro:otro,label:s};
+}
+
+// Resuelve datos para un pasajero concreto combinando reserva + INE + herencia del titular
+// paxIdx: 0 = titular, 1..N = acompañantes
+// Jerarquía: registro INE específico > campo de reserva > herencia del titular (si aplica) > vacío
+function buildFichaData(r, paxIdx){
+  r=r||{};
+  paxIdx=paxIdx||0;
+  var regs=(typeof getReg==="function")?getReg():[];
+  var ineList=r.id?regs.filter(function(x){return x.bookingId===r.id;}):[];
+  // Si hay titular marcado explícito, respétalo. Si no, primer registro.
+  var titular=ineList.find(function(x){return x.esTitular;})||ineList[0]||null;
+  var ine=ineList[paxIdx]||null;
+  // ── Nombre ──
+  var nombreFuente=_fichaClean(ine&&ine.nombre) || (paxIdx===0 ? _fichaClean(r.nombre) : "");
+  // ── Tipo doc ──
+  var tipodoc=_fichaClean(ine&&ine.tipodoc) || (r.docType==="exento"?"Pasaporte":"RUT");
+  var split=_fichaSplitNombre(nombreFuente,tipodoc);
+  // ── Nacionalidad / Residencia con herencia titular ──
+  var nac=_fichaClean(ine&&ine.nacionalidad) || (paxIdx===0?_fichaClean(r.pais):"") || (titular&&paxIdx>0?_fichaClean(titular.nacionalidad):"");
+  var resid=_fichaClean(ine&&ine.residencia) || (paxIdx===0?_fichaClean(r.pais):"") || (titular&&paxIdx>0?_fichaClean(titular.residencia):"");
+  var ciudad=_fichaClean(ine&&ine.ciudad) || (titular&&paxIdx>0?_fichaClean(titular.ciudad):"");
+  // ── Teléfono: INE > reserva > teléfono del titular (sólo si es acompañante) ──
+  var tel=_fichaClean(ine&&ine.telefono) || (paxIdx===0?_fichaClean(r.telefono):"") || (titular&&paxIdx>0?_fichaClean(titular.telefono):"");
+  // ── Patente: INE > reserva.patente > patente titular ──
+  var patente=_fichaClean(ine&&ine.patente) || _fichaClean(r.patente) || (titular?_fichaClean(titular.patente):"");
+  // ── Medio ──
+  var medio=_fichaClean(ine&&ine.medio) || (r.fuente==="booking"?"Booking.com":(_fichaClean(r.medio)||"Directo"));
+  // ── Precios ──
+  var precio=_fichaFmtPrecio(r.precio);
+  // ── Tipo habitación capitalizado ──
+  var tipoHab=_fichaCapTipo(r.tipo);
+  // ── Nº noches: reserva.noches > cálculo > INE.noches ──
+  var noches=r.noches;
+  if(!noches && r.checkin && r.checkout){
+    try{ noches=Math.round((parseLocalDate(r.checkout)-parseLocalDate(r.checkin))/86400000); }catch(e){}
+  }
+  if(!noches && ine && ine.noches) noches=ine.noches;
+  // ── Número de reserva / confirmación ──
+  var numRes=_fichaClean(r.numReserva);
+  // Si es un UUID crudo, no lo muestres (es ruido)
+  if(numRes && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(numRes)) numRes="";
+  // ── Documento tributario ──
+  var docType=_fichaClean(r.docType);
+  // ── Método de pago ──
+  var mpFlags=_fichaMetodoPagoFlags(r.metodoPago||r.pago||r.formaPago||"");
+  return {
+    // Meta
+    esTitular: paxIdx===0,
+    paxIdx: paxIdx,
+    totalPax: r.pax || (ineList.length||1),
+    // Identificación
+    nombreCompleto: nombreFuente,
+    nombres: split.nombres,
+    apellidos: split.apellidos,
+    doc: _fichaClean(ine&&ine.doc),
+    tipodoc: tipodoc,
+    // Origen
+    nacionalidad: nac,
+    residencia: resid,
+    ciudad: ciudad,
+    // Contacto
+    telefono: tel,
+    email: _fichaClean(r.email||r.correo),
+    // Reserva
+    checkin: r.checkin||"",
+    checkout: r.checkout||"",
+    noches: noches||"",
+    roomNum: r.roomNum||"",
+    tipoHab: tipoHab,
+    pax: r.pax||"",
+    precio: precio,
+    numReserva: numRes,
+    medio: medio,
+    cancelada: !!r.cancelada,
+    // Facturación
+    docType: docType,
+    empresa: _fichaClean(r.empresa||r.razonSocial),
+    rutEmpresa: _fichaClean(r.rutEmpresa||r.rutFactura),
+    contactoEmpresa: _fichaClean(r.contactoEmpresa||r.contactoFactura),
+    // Vehículo
+    patente: patente,
+    // Pago
+    mpTransfer: mpFlags.transfer,
+    mpContado: mpFlags.contado,
+    mpTarjeta: mpFlags.tarjeta,
+    mpOtro: mpFlags.otro,
+    mpLabel: mpFlags.label
+  };
+}
+
 // ── Hoja de Check-in / Registro de Pasajeros (réplica fiel de plantilla HLV) ──
 // Si se pasa reservaId, auto-llena los campos. Si no, abre ficha vacía.
 function printCheckinSheet(reservaId){
-  var r=null, ine=null;
+  var r=null;
   if(reservaId){
     var todas=[...getReservas(),...getBookingReservas()];
     r=todas.find(function(x){return x.id===reservaId;});
-    if(r){
-      var regs=getReg();
-      ine=regs.find(function(x){return x.bookingId===reservaId;});
-    }
   }
+  // Resolver todos los datos vía helper centralizado
+  var d = r ? buildFichaData(r, 0) : null;
 
   var hoy=_fmtDatePrint(hoyISO());
-  var _v=function(val){return val||"";};
-  var _esc=function(s){return String(s||"").replace(/"/g,"&quot;");};
+  var _esc=function(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;");};
 
-  // Datos auto-llenados si hay reserva
-  var fechaIng=r?_fmtDatePrint(r.checkin):"";
-  var fechaRet=r?_fmtDatePrint(r.checkout):"";
-  var nombres=r?(r.nombre||"").split(" ").slice(0,-1).join(" ")||r.nombre:"";
-  var apellidos=r?(r.nombre||"").split(" ").slice(-1).join(" "):"";
-  if(r && r.nombre){
-    var parts=(r.nombre||"").split(" ");
-    if(parts.length>=2){nombres=parts.slice(0,Math.ceil(parts.length/2)).join(" ");apellidos=parts.slice(Math.ceil(parts.length/2)).join(" ");}
-    else{nombres=r.nombre;apellidos="";}
-  }
-  // Fuentes de datos: INE > preRegistro > reserva
-  var pr=r&&r.preRegistro?r.preRegistro:null;
-  var doc=ine?_v(ine.doc):(pr?_v(pr.doc):"");
-  var nac=ine?_v(ine.nacionalidad):(pr?_v(pr.nacionalidad):_v(r&&r.pais));
-  var ciudad=ine?_v(ine.ciudad):(pr?_v(pr.ciudad):"");
-  var tel=ine&&ine.telefono&&ine.telefono!=="—"?ine.telefono:(pr?_v(pr.telefono):_v(r&&r.telefono));
-  var patente=ine&&ine.patente&&ine.patente!=="—"?ine.patente:(pr?_v(pr.patente):"");
-  var habNum=r?_v(r.roomNum):"";
-  var tipoHab=r?_v(r.tipo):"";
-  var numReserva=r?_v(r.numReserva||r.id.substring(0,8)):"";
-  var precio=r?_v(r.precio):"";
-  var pax=r?_v(r.pax):"";
+  // Valores auto-llenados
+  var fechaIng=d?_fmtDatePrint(d.checkin):"";
+  var fechaRet=d?_fmtDatePrint(d.checkout):"";
+  var nombres=d?d.nombres:"";
+  var apellidos=d?d.apellidos:"";
+  var doc=d?d.doc:"";
+  var nac=d?d.nacionalidad:"";
+  var ciudad=d?(d.ciudad||d.residencia):"";
+  var tel=d?d.telefono:"";
+  var email=d?d.email:"";
+  var patente=d?d.patente:"";
+  var habNum=d?d.roomNum:"";
+  var tipoHab=r?String(r.tipo||"").toLowerCase():"";
+  var numReserva=d?d.numReserva:"";
+  // Fallback: si no hay numReserva y la reserva tiene id, mostrar primeros 8 chars
+  if(!numReserva && r && r.id && !/^[0-9a-f]{8}-/i.test(r.id)) numReserva=String(r.id).substring(0,8);
+  else if(!numReserva && r && r.id) numReserva=String(r.id).substring(0,8).toUpperCase();
+  var precio=d?d.precio:"";
+  var pax=d?d.pax:"";
+  var empresa=d?d.empresa:"";
+  var rutEmp=d?d.rutEmpresa:"";
+  var contactoEmp=d?d.contactoEmpresa:"";
+  var cancelada=d&&d.cancelada;
 
   // Checkboxes tipo habitación
   var isSingle=tipoHab==="single";
   var isDoble=tipoHab==="doble";
   var isTriple=tipoHab==="triple";
-  var isMatrim=tipoHab==="matrimonial"||tipoHab==="familiar";
+  var isMatrim=tipoHab==="matrimonial";
+  var isFamiliar=tipoHab==="familiar";
 
-  // Estilos inline para la plantilla (replicando formato original)
+  // Checkboxes método de pago
+  var chkTransfer=d&&d.mpTransfer;
+  var chkContado=d&&d.mpContado;
+  var chkTarjeta=d&&d.mpTarjeta;
+  var mpLabel=d?(d.mpLabel||""):"";
+
   var S='style="';
   var fld='border:none;border-bottom:1.5px solid #333;background:transparent;font-size:12px;font-family:inherit;padding:2px 4px;color:#000;outline:none;';
 
   var html=_printBtnBar();
-  // ── CABECERA CON LOGO ──
-  html+='<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:14px;padding-bottom:10px;border-bottom:2px solid #333;">';
-  html+='<div style="display:flex;align-items:center;gap:10px;">';
-  html+='<div style="font-size:11px;line-height:1.3;"><div style="font-size:9px;letter-spacing:0.1em;color:#666;">HOTEL</div><div style="font-size:18px;font-weight:900;font-family:serif;letter-spacing:0.02em;">LAS VICUÑAS</div><div style="font-size:10px;letter-spacing:0.15em;color:#888;">★ ★ ★</div></div>';
-  html+='</div>';
-  html+='<div style="text-align:right;"><div style="font-size:11px;font-weight:700;">FECHA</div><input '+S+fld+'width:140px;text-align:center;" value="'+hoy+'" /></div>';
-  html+='</div>';
+  // Banner de cancelación
+  if(cancelada){
+    html+='<div style="background:#fde2e2;color:#991b1b;border:2px solid #991b1b;padding:8px 12px;margin-bottom:10px;font-weight:800;text-align:center;font-size:13px;">⚠ RESERVA CANCELADA ⚠</div>';
+  }
+  // ── CABECERA UNIFICADA CON LOGO REAL ──
+  html+=_printHeader("Ficha de Check-in","Registro de Pasajeros");
+  html+='<div style="text-align:right;margin-bottom:12px;font-size:11px;"><b>FECHA</b> <input '+S+fld+'width:140px;text-align:center;" value="'+hoy+'" /></div>';
 
   // ── REGISTRO DE PASAJEROS ──
   html+='<div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px;">';
@@ -10813,9 +11443,9 @@ function printCheckinSheet(reservaId){
   // ── INSTITUCIONES / REPARTICIONES / EMPRESAS ──
   html+='<div style="font-size:13px;font-weight:800;margin-bottom:8px;font-family:serif;">INSTITUCIONES / REPARTICIONES / EMPRESAS</div>';
   html+='<div style="display:flex;gap:12px;margin-bottom:14px;font-size:11px;">';
-  html+='<span>Empresa <input '+S+fld+'width:140px;" /></span>';
-  html+='<span>RUT Nº <input '+S+fld+'width:130px;" /></span>';
-  html+='<span>Cont. Rp. <input '+S+fld+'width:180px;" /></span>';
+  html+='<span>Empresa <input '+S+fld+'width:140px;" value="'+_esc(empresa)+'" /></span>';
+  html+='<span>RUT Nº <input '+S+fld+'width:130px;" value="'+_esc(rutEmp)+'" /></span>';
+  html+='<span>Cont. Rp. <input '+S+fld+'width:180px;" value="'+_esc(contactoEmp)+'" /></span>';
   html+='</div>';
 
   // ── INFORMACIÓN PASAJERO ──
@@ -10830,18 +11460,19 @@ function printCheckinSheet(reservaId){
   html+='<span>Transp. Utilizado <input '+S+fld+'width:140px;" /></span>';
   html+='</div>';
   html+='<div style="display:flex;gap:12px;margin-bottom:14px;font-size:11px;">';
-  html+='<span>Correo Electrónico <input '+S+fld+'width:200px;" /></span>';
+  html+='<span>Correo Electrónico <input '+S+fld+'width:200px;" value="'+_esc(email)+'" /></span>';
   html+='<span>Telf./ Cel <input '+S+fld+'width:180px;" value="'+_esc(tel)+'" /></span>';
   html+='</div>';
 
   // ── DEL ALOJAMIENTO ──
   html+='<div style="font-size:13px;font-weight:800;margin-bottom:8px;font-family:serif;">DEL ALOJAMIENTO</div>';
-  html+='<div style="display:flex;gap:12px;margin-bottom:6px;font-size:11px;flex-wrap:wrap;">';
+  html+='<div style="display:flex;gap:12px;margin-bottom:6px;font-size:11px;flex-wrap:wrap;align-items:center;">';
   html+='<span>Reserva <input '+S+fld+'width:80px;" value="'+_esc(numReserva)+'" /></span>';
   html+='<span>R.H <input '+S+fld+'width:60px;" value="'+_esc(pax)+'" /></span>';
-  html+='<span>Transfer <input '+S+fld+'width:80px;" /></span>';
-  html+='<span>Contado <input '+S+fld+'width:80px;" /></span>';
-  html+='<span>$ <input '+S+fld+'width:100px;" value="'+_esc(precio)+'" /></span>';
+  html+='<label style="display:flex;align-items:center;gap:3px;cursor:pointer;"><input type="checkbox" '+(chkTransfer?"checked":"")+' /> Transfer</label>';
+  html+='<label style="display:flex;align-items:center;gap:3px;cursor:pointer;"><input type="checkbox" '+(chkContado?"checked":"")+' /> Contado</label>';
+  html+='<label style="display:flex;align-items:center;gap:3px;cursor:pointer;"><input type="checkbox" '+(chkTarjeta?"checked":"")+' /> Tarjeta</label>';
+  html+='<span>$ <input '+S+fld+'width:110px;text-align:right;" value="'+_esc(precio)+'" /></span>';
   html+='</div>';
   html+='<div style="display:flex;gap:10px;margin-bottom:14px;font-size:11px;align-items:center;flex-wrap:wrap;">';
   html+='<span>Habitación Nº <input '+S+fld+'width:50px;font-weight:700;" value="'+_esc(habNum)+'" /></span>';
@@ -10849,14 +11480,13 @@ function printCheckinSheet(reservaId){
   html+='<label style="display:flex;align-items:center;gap:3px;cursor:pointer;"><input type="checkbox" '+(isDoble?"checked":"")+' /> Doble</label>';
   html+='<label style="display:flex;align-items:center;gap:3px;cursor:pointer;"><input type="checkbox" '+(isTriple?"checked":"")+' /> Triple</label>';
   html+='<label style="display:flex;align-items:center;gap:3px;cursor:pointer;"><input type="checkbox" '+(isMatrim?"checked":"")+' /> Matrimon.</label>';
+  html+='<label style="display:flex;align-items:center;gap:3px;cursor:pointer;"><input type="checkbox" '+(isFamiliar?"checked":"")+' /> Familiar</label>';
   html+='</div>';
 
   // ── REGLAMENTO ESTADÍA ──
   html+='<div style="font-size:13px;font-weight:800;margin-bottom:6px;font-family:serif;">REGLAMENTO ESTADÍA</div>';
   html+='<div style="display:flex;gap:20px;margin-bottom:6px;font-size:11px;">';
   html+='<span><b>Hora de llegada</b> &nbsp; <b>Check IN</b> &nbsp; 14:00 hrs</span>';
-  // FIX: la hora de salida estaba mostrando la FECHA de retiro por error.
-  // Debe ser "12:00 hrs" (hardcodeado, igual que check-in 14:00).
   html+='<span><b>Hora de salida</b> &nbsp; <b>Check Out</b> &nbsp; 12:00 hrs</span>';
   html+='</div>';
   html+='<div style="font-size:10px;line-height:1.6;color:#333;margin-bottom:10px;">';
@@ -10876,10 +11506,10 @@ function printCheckinSheet(reservaId){
   html+='<b><i>Al firmar éste documento doy fe que se me explicó y dio a conocer el reglamento y prohibiciones dentro y fuera del Hotel.</i></b>';
   html+='</div>';
 
-  // ── MÉTODO DE PAGO ──
+  // ── MÉTODO DE PAGO (texto libre además de checkboxes) ──
   html+='<div style="font-size:11px;margin-bottom:20px;">';
   html+='<span style="margin-right:8px;">Método de Pago</span>';
-  html+='<input '+S+fld+'width:250px;" />';
+  html+='<input '+S+fld+'width:250px;" value="'+_esc(mpLabel)+'" />';
   html+='</div>';
 
   // ── PATENTE ──
@@ -10901,57 +11531,39 @@ function printCheckinSheet(reservaId){
 
 // ── Ficha Grupal de Check-in (todos los pasajeros en 1 hoja) ──
 function printFichaGrupal(reservaId){
-  var r=null, ineList=[];
+  var r=null;
   if(reservaId){
     var todas=[...getReservas(),...getBookingReservas()];
     r=todas.find(function(x){return x.id===reservaId;});
-    if(r){
-      var regs=getReg();
-      ineList=regs.filter(function(x){return x.bookingId===reservaId;});
-    }
   }
   var paxTotal=r?(parseInt(r.pax)||1):2;
   if(paxTotal<2) paxTotal=2; // mínimo 2 filas para grupal
 
   var hoy=_fmtDatePrint(hoyISO());
-  var _e=function(s){return String(s||"").replace(/"/g,"&quot;");};
-  var _v=function(s){return s||"";};
+  var _e=function(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;");};
 
-  // Datos de reserva
-  var fechaIng=r?_fmtDatePrint(r.checkin):"";
-  var fechaRet=r?_fmtDatePrint(r.checkout):"";
-  var noches=r?(parseInt(r.noches)||""):"";
-  var habNum=r?_v(r.roomNum):"";
-  var tipoHab=r?_v(r.tipo):"";
-  var numReserva=r?_v(r.numReserva||r.id.substring(0,8)):"";
-  var precio=r?_v(r.precio):"";
-  var patente="";
+  // Titular (pax 0) con todos los datos enriquecidos
+  var d0 = r ? buildFichaData(r,0) : null;
 
-  // Construir array de datos por pasajero (pre-registro + INE + vacío)
+  // Datos de reserva via titular (centralizado)
+  var fechaIng = d0 ? _fmtDatePrint(d0.checkin) : "";
+  var fechaRet = d0 ? _fmtDatePrint(d0.checkout) : "";
+  var noches   = d0 ? d0.noches : "";
+  var habNum   = d0 ? d0.roomNum : "";
+  var tipoHab  = d0 ? d0.tipoHab : "";
+  var numReserva = d0 ? d0.numReserva : "";
+  if(!numReserva && r && r.id) numReserva=String(r.id).substring(0,8).toUpperCase();
+  var precio   = d0 ? d0.precio : "";
+  var patente  = d0 ? d0.patente : "";
+  var email    = d0 ? d0.email : "";
+  var empresa  = d0 ? d0.empresa : "";
+  var mpLabel  = d0 ? d0.mpLabel : "";
+  var cancelada = d0 && d0.cancelada;
+
+  // Construir array de datos por pasajero con buildFichaData (herencia del titular gestionada ahí)
   var paxData=[];
   for(var i=0;i<paxTotal;i++){
-    var d={nombre:"",doc:"",tipodoc:"",nacionalidad:"",residencia:"",ciudad:"",telefono:""};
-    // Fuente 1: registros INE existentes
-    if(ineList[i]){
-      d.nombre=ineList[i].nombre||""; d.doc=ineList[i].doc||"";
-      d.tipodoc=ineList[i].tipodoc||""; d.nacionalidad=ineList[i].nacionalidad||"";
-      d.residencia=ineList[i].residencia||""; d.ciudad=ineList[i].ciudad||"";
-      d.telefono=ineList[i].telefono||"";
-      if(ineList[i].patente && ineList[i].patente!=="—") patente=ineList[i].patente;
-    }
-    // Fuente 2: pre-registro (solo pasajero 1)
-    if(i===0 && r && r.preRegistro && !d.nombre){
-      var pr=r.preRegistro;
-      d.nombre=pr.nombre||""; d.doc=pr.doc||""; d.tipodoc=pr.tipodoc||"";
-      d.nacionalidad=pr.nacionalidad||""; d.residencia=pr.residencia||"";
-      d.ciudad=pr.ciudad||""; d.telefono=pr.telefono||"";
-      if(pr.patente) patente=pr.patente;
-    }
-    // Fuente 3: datos básicos de reserva (solo pasajero 1)
-    if(i===0 && r && !d.nombre){
-      d.nombre=r.nombre||""; d.nacionalidad=r.pais||""; d.telefono=r.telefono||"";
-    }
-    paxData.push(d);
+    paxData.push(r ? buildFichaData(r,i) : {nombreCompleto:"",doc:"",tipodoc:"",nacionalidad:"",residencia:"",ciudad:"",telefono:""});
   }
 
   // ── Estilos compactos para inputs ──
@@ -10960,24 +11572,34 @@ function printFichaGrupal(reservaId){
 
   var html=_printBtnBar();
 
-  // ── CABECERA ──
-  html+='<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:8px;padding-bottom:8px;border-bottom:2.5px solid #333;">';
-  html+='<div><div style="font-size:9px;letter-spacing:0.1em;color:#666;">HOTEL</div><div style="font-size:16px;font-weight:900;font-family:serif;">LAS VICUÑAS <span style="font-size:9px;letter-spacing:0.15em;color:#888;">★★★</span></div></div>';
-  html+='<div style="text-align:center;"><div style="font-size:14px;font-weight:900;font-family:serif;letter-spacing:0.05em;">REGISTRO GRUPAL DE PASAJEROS</div></div>';
-  html+='<div style="text-align:right;font-size:10px;">Fecha: <input '+fldW("90px")+' value="'+hoy+'" /></div>';
-  html+='</div>';
+  // Banner cancelación
+  if(cancelada){
+    html+='<div style="background:#fde2e2;color:#991b1b;border:2px solid #991b1b;padding:6px 10px;margin-bottom:8px;font-weight:800;text-align:center;font-size:12px;">⚠ RESERVA CANCELADA ⚠</div>';
+  }
+
+  // ── CABECERA UNIFICADA ──
+  html+=_printHeaderCompact("REGISTRO GRUPAL DE PASAJEROS");
 
   // ── DATOS DE LA RESERVA (compacto, 2 filas) ──
   html+='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:6px;font-size:10px;padding:6px 8px;background:#f5f0e8;border-radius:6px;">';
-  html+='<span>Reserva: <input '+fldW("60px")+' value="'+_e(numReserva)+'" /></span>';
-  html+='<span>Hab. Nº: <input '+fldW("35px")+' value="'+_e(habNum)+'" style="'+fld+'width:35px;font-weight:700;" /></span>';
+  html+='<span>Reserva: <input '+fldW("70px")+' value="'+_e(numReserva)+'" /></span>';
+  html+='<span>Hab. Nº: <input style="'+fld+'width:35px;font-weight:700;" value="'+_e(habNum)+'" /></span>';
   html+='<span>Tipo: <b>'+_e(tipoHab)+'</b></span>';
   html+='<span>Ingreso: <input '+fldW("75px")+' value="'+_e(fechaIng)+'" /></span>';
   html+='<span>Retiro: <input '+fldW("75px")+' value="'+_e(fechaRet)+'" /></span>';
-  html+='<span>Noches: <input '+fldW("25px")+' value="'+_e(String(noches))+'" /></span>';
+  html+='<span>Noches: <input '+fldW("25px")+' value="'+_e(String(noches||""))+'" /></span>';
   html+='<span>Pax: <input '+fldW("25px")+' value="'+paxTotal+'" /></span>';
-  html+='<span>$: <input '+fldW("80px")+' value="'+_e(precio)+'" /></span>';
+  html+='<span>$: <input '+fldW("90px")+' value="'+_e(precio)+'" /></span>';
   html+='</div>';
+
+  // ── Empresa / Facturación (sólo si hay datos) ──
+  if(empresa){
+    html+='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:6px;font-size:10px;padding:4px 8px;background:#eef3f0;border-radius:6px;">';
+    html+='<span>Empresa: <b>'+_e(empresa)+'</b></span>';
+    if(d0.rutEmpresa) html+='<span>RUT Fact.: '+_e(d0.rutEmpresa)+'</span>';
+    if(d0.contactoEmpresa) html+='<span>Contacto: '+_e(d0.contactoEmpresa)+'</span>';
+    html+='</div>';
+  }
 
   // ── PASAJEROS (compacto: 3 líneas por persona) ──
   for(var i=0;i<paxTotal;i++){
@@ -10992,7 +11614,7 @@ function printFichaGrupal(reservaId){
 
     // Fila 1: Nombre + Documento
     html+='<div style="display:flex;gap:8px;margin-bottom:3px;font-size:10px;">';
-    html+='<span style="flex:1;">Nombre: <input '+fldW("calc(100% - 55px)")+' value="'+_e(p.nombre)+'" /></span>';
+    html+='<span style="flex:1;">Nombre: <input '+fldW("calc(100% - 55px)")+' value="'+_e(p.nombreCompleto||p.nombre)+'" /></span>';
     html+='<span>Doc: <select style="font-size:10px;border:none;border-bottom:1.2px solid #555;background:transparent;padding:0 2px;font-family:inherit;">';
     html+='<option'+(p.tipodoc==="Pasaporte"?" selected":"")+'>Pasaporte</option>';
     html+='<option'+(p.tipodoc==="RUT"?" selected":"")+'>RUT</option>';
@@ -11010,10 +11632,11 @@ function printFichaGrupal(reservaId){
     html+='</div>';
   }
 
-  // ── VEHÍCULO + MÉTODO DE PAGO ──
-  html+='<div style="display:flex;gap:20px;font-size:10px;margin:6px 0;">';
+  // ── VEHÍCULO + MÉTODO DE PAGO + EMAIL ──
+  html+='<div style="display:flex;gap:14px;flex-wrap:wrap;font-size:10px;margin:6px 0;">';
   html+='<span>Patente vehículo: <input '+fldW("120px")+' value="'+_e(patente)+'" /></span>';
-  html+='<span>Método de pago: <input '+fldW("160px")+' /></span>';
+  html+='<span>Método de pago: <input '+fldW("140px")+' value="'+_e(mpLabel)+'" /></span>';
+  html+='<span>Email titular: <input '+fldW("180px")+' value="'+_e(email)+'" /></span>';
   html+='</div>';
 
   // ── REGLAMENTO CONDENSADO ──
@@ -11049,37 +11672,74 @@ function printConfirmacion(reservaId){
   var r=todas.find(function(x){return x.id===reservaId;});
   if(!r){toast("Reserva no encontrada","err");return;}
 
+  var _e=function(s){return String(s==null?"":s).replace(/&/g,"&amp;").replace(/"/g,"&quot;").replace(/</g,"&lt;");};
+  var d = buildFichaData(r, 0);
+
   var PRECIOS={single:53550,doble:59500,matrimonial:65450,triple:77350,familiar:77350,flex:55000};
   var precioBase=PRECIOS[r.tipo]||55000;
-  var noches=parseInt(r.noches)||1;
+  var noches=parseInt(d.noches)||parseInt(r.noches)||1;
   var totalEst=precioBase*noches;
-  var precioStr=r.precio? r.precio : "$"+totalEst.toLocaleString("es-CL");
+  // Prefiere precio de la reserva (formateado); si no, usa el estimado
+  var precioStr = d.precio || "$"+totalEst.toLocaleString("es-CL");
   var hoy=hoyISO();
+  var tipoCap = d.tipoHab || _fichaCapTipo(r.tipo);
+  var numRes = d.numReserva || (r.id ? String(r.id).substring(0,8).toUpperCase() : "");
+
+  // Teléfono hotel (no-placeholder). Ajustable en producción.
+  var TELEFONO_HOTEL = "+56 58 258 4000";
+  var EMAIL_HOTEL    = "reservas@hotellasvicunas.cl";
 
   var html=_printBtnBar()+_printHeader("Confirmación de Reserva","");
 
   html+='<div style="text-align:center;margin-bottom:16px;">';
-  html+='<span class="pd-badge pd-badge-ok">'+(r.cancelada?"CANCELADA":"CONFIRMADA")+'</span>';
+  if(d.cancelada){
+    html+='<span class="pd-badge pd-badge-err">CANCELADA</span>';
+  } else {
+    html+='<span class="pd-badge pd-badge-ok">CONFIRMADA</span>';
+  }
+  if(d.esTitular && d.totalPax>1){
+    html+='<span class="pd-badge pd-badge-ok" style="margin-left:6px;">'+d.totalPax+' huéspedes</span>';
+  }
   html+='</div>';
 
   html+='<div class="pd-section"><div class="pd-section-title">Detalle de Reserva</div><div class="pd-grid">';
-  html+='<div class="pd-field"><label>Huésped</label><input value="'+(r.nombre||"")+'" /></div>';
-  html+='<div class="pd-field"><label>Nº Reserva</label><input value="'+(r.numReserva||r.id.substring(0,8))+'" /></div>';
-  html+='<div class="pd-field"><label>Habitación</label><input value="'+(r.roomNum?("Nº "+r.roomNum+" — "+r.tipo):r.tipo||"")+'" /></div>';
-  html+='<div class="pd-field"><label>Huéspedes</label><input value="'+(r.pax||1)+'" /></div>';
-  // FIX: horarios inconsistentes con el resto de la app (14:00/12:00 es el oficial)
-  html+='<div class="pd-field"><label>Check-in</label><input value="'+_fmtDatePrint(r.checkin)+' (14:00 hrs)" /></div>';
-  html+='<div class="pd-field"><label>Check-out</label><input value="'+_fmtDatePrint(r.checkout)+' (12:00 hrs)" /></div>';
+  html+='<div class="pd-field"><label>Huésped</label><input value="'+_e(d.nombreCompleto||r.nombre)+'" /></div>';
+  html+='<div class="pd-field"><label>Nº Reserva</label><input value="'+_e(numRes)+'" /></div>';
+  html+='<div class="pd-field"><label>Habitación</label><input value="'+_e(r.roomNum?("Nº "+r.roomNum+" — "+tipoCap):tipoCap)+'" /></div>';
+  html+='<div class="pd-field"><label>Huéspedes</label><input value="'+_e(d.pax||r.pax||1)+'" /></div>';
+  html+='<div class="pd-field"><label>Check-in</label><input value="'+_fmtDatePrint(d.checkin)+' (14:00 hrs)" /></div>';
+  html+='<div class="pd-field"><label>Check-out</label><input value="'+_fmtDatePrint(d.checkout)+' (12:00 hrs)" /></div>';
   html+='<div class="pd-field"><label>Noches</label><input value="'+noches+'" /></div>';
-  html+='<div class="pd-field"><label>Precio estimado</label><input value="'+precioStr+'" /></div>';
+  html+='<div class="pd-field"><label>Precio '+(d.precio?"":"estimado")+'</label><input value="'+_e(precioStr)+'" /></div>';
   html+='</div></div>';
+
+  // Contacto huésped (sólo si hay datos)
+  if(d.telefono || d.email){
+    html+='<div class="pd-section"><div class="pd-section-title">Contacto del Huésped</div><div class="pd-grid">';
+    if(d.telefono) html+='<div class="pd-field"><label>Teléfono</label><input value="'+_e(d.telefono)+'" /></div>';
+    if(d.email)    html+='<div class="pd-field"><label>Email</label><input value="'+_e(d.email)+'" /></div>';
+    if(d.nacionalidad) html+='<div class="pd-field"><label>Nacionalidad</label><input value="'+_e(d.nacionalidad)+'" /></div>';
+    if(d.medio)    html+='<div class="pd-field"><label>Medio de reserva</label><input value="'+_e(d.medio)+'" /></div>';
+    html+='</div></div>';
+  }
+
+  // Facturación (sólo si hay empresa)
+  if(d.empresa){
+    html+='<div class="pd-section"><div class="pd-section-title">Facturación</div><div class="pd-grid">';
+    html+='<div class="pd-field"><label>Empresa</label><input value="'+_e(d.empresa)+'" /></div>';
+    if(d.rutEmpresa)       html+='<div class="pd-field"><label>RUT</label><input value="'+_e(d.rutEmpresa)+'" /></div>';
+    if(d.contactoEmpresa)  html+='<div class="pd-field"><label>Contacto</label><input value="'+_e(d.contactoEmpresa)+'" /></div>';
+    if(d.docType)          html+='<div class="pd-field"><label>Documento</label><input value="'+_e(_fichaCapTipo(d.docType))+'" /></div>';
+    html+='</div></div>';
+  }
 
   html+='<div class="pd-section"><div class="pd-section-title">Información del Hotel</div>';
   html+='<div style="font-size:12px;line-height:1.8;color:#555;">';
   html+='<strong>Hotel Las Vicuñas</strong><br>';
   html+='Baquedano 119, Putre, Arica y Parinacota, Chile<br>';
   html+='Altitud: 3.500 m.s.n.m. · Región XV<br>';
-  html+='Teléfono: +56 9 XXXX XXXX<br>';
+  html+='Teléfono: '+TELEFONO_HOTEL+'<br>';
+  html+='Email: '+EMAIL_HOTEL+'<br>';
   html+='</div></div>';
 
   html+='<div class="pd-section"><div class="pd-section-title">Políticas</div>';
@@ -11792,21 +12452,34 @@ async function fbLimpiarTodo(){
   }
 }
 
-// ── Auto-init — credenciales fijas ────────────────────────────────
-const SB_HARDCODED = {
-  url: "https://nozambkjwkmvusvuqyiu.supabase.co",
-  key: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5vemFtYmtqd2ttdnVzdnVxeWl1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2OTE1NzQsImV4cCI6MjA4OTI2NzU3NH0.NSXp5_Wvnh9-WSIOYlMtfYa0yQFBYZ0INHo7zqwbcX0"
-};
+// ── Auto-init — credenciales desde config.js externo ────────────────
+// Las credenciales viven en config.js (cargado antes que este script).
+// Si config.js no existe (deploy mal configurado), se usa fallback de localStorage
+// o se pide al usuario configurar manualmente desde el modal.
+const SB_HARDCODED = (window.HLV_CONFIG && window.HLV_CONFIG.SUPABASE_URL && window.HLV_CONFIG.SUPABASE_ANON_KEY)
+  ? { url: window.HLV_CONFIG.SUPABASE_URL, key: window.HLV_CONFIG.SUPABASE_ANON_KEY }
+  : null;
 
 (function(){
   // Migración one-time: convertir hv_sucias/hv_limpias_hoy → hv_room_states
   _migrateToRoomStates();
   _initChecklistConfig();
-  // Siempre usar credenciales fijas — no requiere configuración manual
   setSyncStatus("warn","Conectando...");
-  // Save to localStorage so modal shows them if opened
-  localStorage.setItem(FB_CFG_KEY, JSON.stringify(SB_HARDCODED));
-  setTimeout(()=>initSupabase(SB_HARDCODED, false), 600);
+  if(SB_HARDCODED){
+    // Save to localStorage so modal shows them if opened
+    localStorage.setItem(FB_CFG_KEY, JSON.stringify(SB_HARDCODED));
+    setTimeout(()=>initSupabase(SB_HARDCODED, false), 600);
+  } else {
+    // Sin config.js: intentar usar credenciales previamente guardadas, si no, mostrar modal
+    var saved = null;
+    try { saved = JSON.parse(localStorage.getItem(FB_CFG_KEY)||"null"); } catch(e){}
+    if(saved && saved.url && saved.key){
+      setTimeout(()=>initSupabase(saved, false), 600);
+    } else {
+      setSyncStatus("err","Falta config.js");
+      console.warn("[HLV] config.js no encontrado o incompleto. La app funcionará offline. Configurá las credenciales en config.js o desde el modal de sincronización.");
+    }
+  }
 })();
 
 
@@ -11960,3 +12633,4 @@ ALTER PUBLICATION supabase_realtime ADD TABLE hotel_data;</code></div>
 </div>
 </body>
 </html>
+

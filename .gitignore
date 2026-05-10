@@ -1,0 +1,25 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# Hotel Las Vicuñas — Recepción & Housekeeping
+# ═══════════════════════════════════════════════════════════════════════════
+# Archivos con secretos: NO commitear nunca.
+
+config.js
+.env
+.env.local
+.env.*.local
+
+# Backups locales
+*.backup
+*.bak
+backup-*.json
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# Logs
+*.log
+npm-debug.log*
