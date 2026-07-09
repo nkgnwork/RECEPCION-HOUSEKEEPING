@@ -134,7 +134,52 @@ ALTER PUBLICATION supabase_realtime ADD TABLE hotel_data;
 
 ---
 
-## Ediciones recientes (Build 20260510)
+## Ediciones recientes (Build 20260708) — Hardening de seguridad
+
+**Los datos de pasajeros ya NO son accesibles públicamente.** Antes, la anon key
+(pública por diseño, visible en `config.js`) daba acceso de lectura/escritura a
+toda la tabla `hotel_data` (reservas, registros INE, usuarios) sin login. Ahora:
+
+- RLS de `hotel_data` exige una sesión autenticada (`auth.role()='authenticated'`).
+- Nueva Edge Function `hlv-session`: intercambia el password/PIN ya validado en el
+  login de la app por una sesión real de Supabase. Se dispara automáticamente al
+  loguearte (rol principal o Housekeeping) — no requiere nada manual.
+- Se quitó el botón "Invitado / Solo disponibilidad" (acceso sin login), no se usaba.
+- Verificado con curl: la anon key sola ya no puede leer ni escribir datos reales.
+- Detalle técnico completo en `CLAUDE.md` → "Hardening de seguridad (2026-07-08)".
+
+⚠️ Pendiente recomendado: cambiar el password/PIN del dueño desde el valor default
+(`administracion` / `0000`) apenas puedas — sigue así en la base de producción.
+
+## Ediciones recientes (Build 20260704)
+
+**Pulido visual (4 jul 2026, tarde) — auditado con capturas reales en headless Chrome:**
+- FIX: logo roto en sidebar y header de Housekeeping (el JS buscaba una clase CSS inexistente `.ls-logo`).
+- FIX contraste: el badge de sync ("Sin sync / Sincronizado") era texto blanco sobre fondo crema — ilegible en modo claro.
+- FIX mobile: el título de página chocaba con la fecha/hora en el topbar (< 640px se oculta el reloj y el título se trunca con elipsis).
+- FIX: fechas "Sábado, 4 De Julio De 2026" → capitalización correcta (solo primera letra).
+- FIX UX: Cotización ya no muestra "⚠ Sin disponibilidad" en rojo cuando todavía no elegiste fechas (hint neutro).
+- Sistema de botones unificado en Registro INE (antes 7 colores distintos en una fila): primario relleno marrón + secundarios outline + destructivo rojo outline. Dark mode incluido.
+- Toolbar de import Booking: los 3 botones de import ahora comparten el azul Booking (antes navy/verde/violeta).
+- Leyenda de 29 habitaciones: puntos de color discretos en vez de 29 bloques saturados.
+- Housekeeping: botón "Distribuir turno" integrado al tema verde (antes violeta).
+- Dark mode: "booking.com" y "Ver reservas importadas" ahora legibles (azul claro).
+
+**Import Booking robusto (4 jul 2026):**
+- FIX CRÍTICO: el export en español del extranet de Booking (columnas "Entrada"/"Salida") ahora importa correctamente. Antes importaba 0 reservas.
+- Parser CSV reescrito con soporte real de comillas: remarks con comas, saltos de línea y comillas escapadas ("") ya no rompen la fila ni pierden el país del huésped.
+- BOM UTF-8 al inicio del archivo se elimina automáticamente.
+- Precios se normalizan al importar ("CLP 119,000.00" y "119.000 CLP" → 119000), evitando totales erróneos en Finanzas.
+- Reservas grupales (mismo nº de reserva, una fila por habitación) importan todas las habitaciones con sufijo _2, _3…; filas 100% idénticas se descartan como duplicado.
+- FIX: la clave de columna "id" hacía match parcial con "salida"/"unidad" y contaminaba el nº de reserva.
+- Columnas ES adicionales reconocidas: "Reservada el", "Metodo Pago", "Ingreso" (permite migrar la planilla propia RESERVAS HLV, aunque marca todo como canal Booking).
+- No-shows (`no_show`, "No show") se tratan como canceladas: no ocupan habitación ni pasan a INE/finanzas.
+- Filas con fechas inválidas ya no se descartan en silencio: el mensaje de import avisa cuántas se omitieron.
+- Precio "N/A" o sin dígitos → se guarda vacío en lugar del texto literal.
+- Carpeta `tests/` con harness que ejecuta el parser real contra 11 casos (EN/ES/XLSX/grupal/no-show/corruptos/overflow). Ver CLAUDE.md.
+- Backend verificado E2E con la anon key real: REST + realtime ✓. Tabla residual insegura `_temp_transfer` eliminada de Supabase.
+
+## Ediciones anteriores (Build 20260510)
 
 **Bugfixes operativos (10 may 2026):**
 - Pre-registro: rate limit ahora persiste en localStorage (no se resetea al recargar la página).

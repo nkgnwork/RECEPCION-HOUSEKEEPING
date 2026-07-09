@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- Hotel Las Vicuñas · Recepción & Housekeeping v4.3 · Build 20260510 -->
+<!-- Hotel Las Vicuñas · Recepción & Housekeeping v4.3 · Build 20260704 -->
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -226,23 +226,39 @@ function importarCSV(input){
         rows = XLSX.utils.sheet_to_json(ws, {defval:""});
       } else {
         var text = new TextDecoder("utf-8").decode(e.target.result);
-        var lines = text.split(/\r?\n/).filter(function(l){ return l.trim(); });
-        if(lines.length < 2){ setBKStatus("CSV vacío.","err"); return; }
-        var sep = lines[0].includes(";") ? ";" : ",";
-        var headers = lines[0].split(sep).map(function(h){ return h.replace(/^["']|["']$/g,"").trim(); });
-        for(var i=1; i<lines.length; i++){
-          var cols = [];
-          var raw = lines[i];
-          var inQ = false, cur = "";
-          for(var ci=0; ci<raw.length; ci++){
-            var ch = raw[ci];
-            if(ch==='"'){ inQ=!inQ; continue; }
-            if(ch===sep && !inQ){ cols.push(cur.trim()); cur=""; continue; }
-            cur+=ch;
+        if(text.charCodeAt(0) === 0xFEFF) text = text.slice(1); // quitar BOM UTF-8
+        var firstNL = text.indexOf("\n");
+        var firstLine = firstNL === -1 ? text : text.slice(0, firstNL);
+        var sep = firstLine.includes(";") ? ";" : ",";
+        // Parser CSV con soporte real de comillas: separadores, saltos de línea
+        // y comillas escapadas ("") DENTRO de campos (ej: remarks de Booking)
+        var records = [];
+        var field = "", record = [], inQ = false;
+        for(var ci=0; ci<text.length; ci++){
+          var ch = text[ci];
+          if(inQ){
+            if(ch === '"'){
+              if(text[ci+1] === '"'){ field += '"'; ci++; }
+              else inQ = false;
+            } else field += ch;
+          } else {
+            if(ch === '"') inQ = true;
+            else if(ch === sep){ record.push(field.trim()); field = ""; }
+            else if(ch === "\n" || ch === "\r"){
+              if(ch === "\r" && text[ci+1] === "\n") ci++;
+              record.push(field.trim()); field = "";
+              if(record.length > 1 || record[0] !== "") records.push(record);
+              record = [];
+            }
+            else field += ch;
           }
-          cols.push(cur.trim());
+        }
+        if(field !== "" || record.length){ record.push(field.trim()); if(record.length > 1 || record[0] !== "") records.push(record); }
+        if(records.length < 2){ setBKStatus("CSV vacío.","err"); return; }
+        var headers = records[0].map(function(h){ return h.replace(/^["']|["']$/g,"").trim(); });
+        for(var i=1; i<records.length; i++){
           var obj = {};
-          headers.forEach(function(h,j){ obj[h] = cols[j]||""; });
+          headers.forEach(function(h,j){ obj[h] = records[i][j]||""; });
           rows.push(obj);
         }
       }
@@ -258,6 +274,19 @@ function importarCSV(input){
           if(found && row[found]) return row[found];
         }
         return "";
+      }
+      // Normaliza precios de Booking a dígitos CLP: "CLP 119,000.00" → "119000",
+      // "119.000 CLP" → "119000". Evita que finanzas parsee mal formatos EN/ES.
+      function normPrecioBK(s){
+        s = String(s||"").trim();
+        if(!s) return "";
+        var num = s.replace(/[^0-9.,]/g,"");
+        if(!num) return ""; // "N/A", "-", etc. → sin precio
+        // Cola de 1-2 dígitos tras . o , = decimales → descartar (CLP no usa decimales)
+        var mDec = num.match(/^(.*)[.,](\d{1,2})$/);
+        if(mDec) num = mDec[1];
+        num = num.replace(/[.,]/g,"");
+        return num || "";
       }
       function parseFecha(v){
         if(!v || v==="") return null;
@@ -284,35 +313,56 @@ function importarCSV(input){
       }
       var reservas = [];
       var yaIds = [];
+      var omitidas = 0; // filas con fechas inválidas — avisar al usuario, no fallar en silencio
       for(var ri=0; ri<norm.length; ri++){
         var row = norm[ri];
         var estadoRaw = getCol(row, ["status","estado","cancelled"]);
-        var esCancelada = estadoRaw.toLowerCase().includes("cancel");
-        var ci = parseFecha(getCol(row, ["check-in","checkin","arrival","llegada","from","check in"]));
-        var co = parseFecha(getCol(row, ["check-out","checkout","departure","salida","to","check out"]));
-        if(!ci || !co || ci >= co) continue;
+        // cancel* (EN/ES) y no-show: ambos liberan habitación y no pasan a INE/finanzas
+        var esCancelada = /cancel|no[_\s-]?show/i.test(estadoRaw);
+        var ci = parseFecha(getCol(row, ["check-in","checkin","arrival","llegada","entrada","ingreso","check in","from"]));
+        var co = parseFecha(getCol(row, ["check-out","checkout","departure","salida","check out","to"]));
+        if(!ci || !co || ci >= co){ omitidas++; continue; }
         var nombre = getCol(row, ["guest name","nombre del huésped","guest","huésped","name","nombre"]) || "Huésped Booking";
-        var numRes = getCol(row, ["book number","booking number","número de reserva","reservation","booking","id","ref"]);
+        // OJO: no usar claves cortas tipo "id" — hacen match parcial con "salida", "unidad", etc.
+        var numRes = getCol(row, ["book number","booking number","número de reserva","numero de reserva","reservation","booking"]);
         var paxStr = getCol(row, ["persons","personas","adults","adultos","guests","pax"]);
         var pax = parseInt(paxStr) || null;
         var pais = getCol(row, ["booker country","country","país","pais","nationality","nacionalidad"]);
         var esChileno = pais.toLowerCase().includes("chile") || pais.toLowerCase() === "cl";
         var docType = esChileno ? "boleta" : "exento";
-        var precio = getCol(row, ["price","precio","total","importe"]);
+        var precio = normPrecioBK(getCol(row, ["price","precio","total","importe"]));
         var telefono = getCol(row, ["phone","teléfono","telefono","phone number"]);
         var habitacion = getCol(row, ["rooms","room","habitación","habitacion","unit type","unit"]);
         var noches = getCol(row, ["duration","noches","nights","duración"]);
         // Campos adicionales de Booking: email, observaciones, fecha de booking, método de pago
         var email = getCol(row, ["email","e-mail","correo","mail"]);
         var notas = getCol(row, ["remarks","notas","notes","comentarios","special requests","observaciones"]);
-        var bookedOn = parseFecha(getCol(row, ["booked on","booking date","reservado el","fecha reserva","fecha de reserva"]));
-        var pago = getCol(row, ["payment","payment method","método de pago","metodo de pago","forma de pago"]);
+        var bookedOn = parseFecha(getCol(row, ["booked on","booking date","reservado el","reservada el","fecha reserva","fecha de reserva"]));
+        var pago = getCol(row, ["payment method","método de pago","metodo de pago","forma de pago","metodo pago","payment"]);
         var id = "BK_XLS_" + (numRes || (ci+"_"+nombre.slice(0,10).replace(/\s+/g,"_")));
-        if(yaIds.includes(id)) continue;
+        if(yaIds.includes(id)){
+          // Mismo nº de reserva ya visto: si es fila idéntica (mismas fechas) es un
+          // duplicado real → saltar. Si difiere (reserva grupal, una fila por
+          // habitación) → importar con sufijo para no perder habitaciones.
+          var esFilaDuplicada = false;
+          for(var pi=0; pi<reservas.length; pi++){
+            var pr = reservas[pi];
+            if(pr.id!==id && pr.id.indexOf(id+"_")!==0) continue; // solo mismo nº base
+            if(pr.checkin===ci && pr.checkout===co
+               && String(pr._habRaw||"")===String(habitacion)
+               && String(pr.precio||"")===String(precio)
+               && (pr.pax||null)===(pax||null)){ esFilaDuplicada = true; break; }
+          }
+          if(esFilaDuplicada) continue;
+          var sfx = 2;
+          while(yaIds.includes(id+"_"+sfx)) sfx++;
+          id = id + "_" + sfx;
+        }
         yaIds.push(id);
         var tipo = detectarTipo(habitacion) || detectarTipo(nombre);
         var roomNumFinal = esCancelada ? null : asignarHabBooking(ci, co, tipo, yaIds.slice(), reservas);
         reservas.push({
+          _habRaw:habitacion,
           id:id, roomNum:roomNumFinal, checkin:ci, checkout:co,
           nombre:nombre||"Huésped Booking",
           noches:parseInt(noches)||Math.round((parseLocalDate(co)-parseLocalDate(ci))/86400000),
@@ -330,11 +380,13 @@ function importarCSV(input){
       var existentesIds = existentes.map(function(r){ return r.id; });
       var nuevas = reservas.filter(function(r){ return !existentesIds.includes(r.id); });
       var todas = existentes.concat(nuevas);
+      todas.forEach(function(r){ delete r._habRaw; }); // campo interno de dedup, no persistir
       fbSaveBooking(todas);
       var sinHab = reservas.filter(function(r){ return !r.roomNum && !r.cancelada; }).length;
       var msg = "\u2713 " + nuevas.length + " reserva" + (nuevas.length!==1?"s":"") + " importada" + (nuevas.length!==1?"s":"")
         + (existentes.length?" (+"+existentes.length+" ya existentes)":"")
-        + (sinHab?" \u26a0\ufe0f "+sinHab+" sin hab.":"");
+        + (sinHab?" \u26a0\ufe0f "+sinHab+" sin hab.":"")
+        + (omitidas?" \u26a0\ufe0f "+omitidas+" fila"+(omitidas!==1?"s":"")+" omitida"+(omitidas!==1?"s":"")+" (fechas inv\u00e1lidas)":"");
       setBKStatus(msg, sinHab?"err":"ok");
       toast(msg, sinHab?"warn":"ok", 4000);
       document.getElementById("bkClear").style.display = "inline-block";
@@ -1309,6 +1361,9 @@ async function authLogout(){
   currentUser = null;
   _sessionStartedAt = null;
   _sessionPinCache = {};
+  // Cerrar también la sesión de Supabase (deja el dispositivo sin privilegios
+  // de lectura/escritura sobre hotel_data hasta el próximo login).
+  try{ if(sbClient) await sbClient.auth.signOut(); }catch(e){}
 }
 
 // ── AUTH: VERIFICAR PERMISO ───────────────────────────────────
@@ -2376,8 +2431,16 @@ body.dark .pm-btn:hover{background:var(--gold);color:#fff;}
 /* ── Dark mode: sidebar, topbar, main ── */
 body.dark .sidebar{background:linear-gradient(180deg,#151210 0%,#1a1612 40%,#121010 100%);border-right-color:rgba(200,149,108,0.08);}
 body.dark .topbar{background:rgba(28,24,20,0.85);border-bottom-color:var(--b2);}
+/* FIX mobile: la fecha/hora chocaba con el título de página en pantallas angostas */
+@media(max-width:640px){
+  .tb-clock{display:none;}
+  .tb-breadcrumb{font-size:15px;max-width:38vw;overflow:hidden;text-overflow:ellipsis;}
+}
 body.dark .tb-breadcrumb{color:var(--t);}
 body.dark .tb-sync{background:var(--s2);}
+/* FIX contraste dark: links/textos azul Booking ilegibles sobre fondo oscuro */
+body.dark #bkSummary{color:#8ab4ff !important;}
+body.dark .bk-logo{color:#8ab4ff;}
 body.dark .tb-btn{border-color:var(--b2);color:var(--t3);}
 body.dark .tb-btn:hover{background:var(--s2);color:var(--t);}
 
@@ -2854,8 +2917,15 @@ table.fin tfoot .td-monto{color:var(--mar);font-size:14px;}
 /* REGISTRO */
 .rh{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px;}
 .rh h2{font-size:16px;font-weight:800;color:var(--mar);letter-spacing:-0.02em;}
-.bexp{padding:7px 14px;background:linear-gradient(135deg,#185FA5,#2070c0);color:#fff;border:none;border-radius:var(--r);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 2px 6px rgba(24,95,165,0.2);transition:all .15s;}
-.bexp:hover{box-shadow:0 4px 10px rgba(24,95,165,0.3);transform:translateY(-1px);}
+/* Sistema de botones unificado (antes: 7 colores distintos en una misma fila).
+   Base = outline en paleta de marca · .bexp-primary = acción principal rellena. */
+.bexp{padding:7px 14px;background:var(--s,#fff);color:#6b4a23;border:1.5px solid #d9c9ab;border-radius:var(--r);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:0 1px 3px rgba(90,66,40,0.08);transition:all .15s;}
+.bexp:hover{background:#f7f0e4;border-color:#c2a878;box-shadow:0 3px 8px rgba(90,66,40,0.15);transform:translateY(-1px);}
+.bexp-primary{background:linear-gradient(135deg,#5c3d1e,#7a5228);color:#fff;border-color:transparent;box-shadow:0 2px 6px rgba(92,61,30,0.25);}
+.bexp-primary:hover{background:linear-gradient(135deg,#6b4a23,#8a5f2e);color:#fff;border-color:transparent;}
+body.dark .bexp{background:transparent;color:#d9c9ab;border-color:rgba(217,201,171,0.35);}
+body.dark .bexp:hover{background:rgba(217,201,171,0.08);border-color:rgba(217,201,171,0.6);}
+body.dark .bexp-primary{background:linear-gradient(135deg,#7a5228,#96703d);color:#fff;}
 .bdng{padding:7px 12px;background:transparent;color:#b91c1c;border:1.5px solid #fca5a5;border-radius:var(--r);font-size:12px;cursor:pointer;font-family:inherit;font-weight:600;transition:all .15s;}
 .bdng:hover{background:#fee2e2;border-color:#dc2626;}
 .fr{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;}
@@ -3234,6 +3304,9 @@ table.fin tfoot .td-monto{color:var(--mar);font-size:14px;}
 .sync-dot.off{background:#9ca3af;}
 @keyframes pulse-sync{0%,100%{opacity:1;}50%{opacity:0.3;}}
 .sync-lbl{font-size:10px;color:rgba(255,255,255,0.7);}
+/* FIX contraste: en el topbar (fondo claro) el label de sync era blanco → invisible */
+.tb-sync .sync-lbl{color:var(--t2,#5a4c38);font-weight:600;}
+body.dark .tb-sync .sync-lbl{color:rgba(255,255,255,0.78);}
 .sync-bar{display:flex;align-items:center;gap:2px;padding:3px 8px;border-radius:6px;background:rgba(255,255,255,0.08);cursor:pointer;}
 .sync-bar:hover{background:rgba(255,255,255,0.15);}
 
@@ -3616,7 +3689,9 @@ body.dark .gantt-bar--bk{background:linear-gradient(90deg,rgba(59,130,246,0.2),r
 /* ═══ DASHBOARD KPIs ═══ */
 .dash-header{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:22px;}
 .dash-title{font-family:var(--font-display);font-size:26px;font-weight:700;color:var(--t);margin:0;}
-.dash-date{font-size:13px;color:var(--t3);text-transform:capitalize;}
+/* FIX: capitalize ponía "Sábado, 4 De Julio De 2026" — solo la 1ª letra va en mayúscula */
+.dash-date{font-size:13px;color:var(--t3);}
+.dash-date::first-letter{text-transform:uppercase;}
 .dash-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px;}
 .dash-card{border-radius:16px;padding:22px 20px;box-shadow:var(--el-2);display:flex;align-items:flex-start;gap:14px;transition:box-shadow 0.25s,transform 0.25s;position:relative;overflow:hidden;}
 .dash-card::before{content:'';position:absolute;top:0;right:0;width:80px;height:80px;border-radius:50%;opacity:0.08;transform:translate(20px,-20px);}
@@ -4393,10 +4468,10 @@ document.addEventListener('DOMContentLoaded',function(){
           <span class="ls-secondary-label">Personal de housekeeping</span>
           <button class="ls-secondary-link" onclick="doHousekeeping()">Acceder con PIN</button>
         </div>
-        <div class="ls-secondary-row">
-          <span class="ls-secondary-label">Vista de huéspedes</span>
-          <button class="ls-secondary-link" onclick="doGuest()">Solo disponibilidad</button>
-        </div>
+        <!-- Modo "Invitado / Solo disponibilidad" retirado (Build 20260708):
+             daba acceso de lectura a hotel_data sin login. Confirmado con el
+             dueño que no se usa; con la RLS endurecida ya no funcionaría
+             (no hay sesión autenticada), así que se quitó para no confundir. -->
       </div>
 
       <div class="ls-form-foot">
@@ -4419,7 +4494,7 @@ document.addEventListener('DOMContentLoaded',function(){
         <div id="hkFecha" class="hk-rol"></div>
       </div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-        <button id="btnDistribuirTurno" onclick="if(confirm('¿Distribuir habitaciones sucias entre el personal?')){distribuirTurno();renderHK();}" style="display:none;background:linear-gradient(135deg,#7c3aed,#6d28d9);border:none;color:#fff;border-radius:8px;padding:6px 12px;font-size:11px;cursor:pointer;font-family:inherit;font-weight:700;box-shadow:0 2px 8px rgba(109,40,217,0.3);" title="Distribuir habitaciones entre personal HK">Distribuir turno</button>
+        <button id="btnDistribuirTurno" onclick="if(confirm('¿Distribuir habitaciones sucias entre el personal?')){distribuirTurno();renderHK();}" style="display:none;background:rgba(255,255,255,0.14);border:1.5px solid rgba(255,255,255,0.45);color:#fff;border-radius:8px;padding:6px 12px;font-size:11px;cursor:pointer;font-family:inherit;font-weight:700;" title="Distribuir habitaciones entre personal HK">Distribuir turno</button>
         <button onclick="renderHK()" style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.3);color:#fff;border-radius:8px;padding:6px 10px;font-size:11px;cursor:pointer;font-family:inherit;font-weight:600;display:inline-flex;align-items:center;gap:4px;" title="Actualizar" aria-label="Actualizar lista"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg></button>
         <button class="hk-logout" onclick="doLogoutHK()">Salir</button>
       </div>
@@ -4855,12 +4930,12 @@ document.addEventListener('DOMContentLoaded',function(){
             Importar .ics de Booking
           </label>
           <input type="file" id="bkFile" class="bk-inp" accept=".ics" onchange="importarICS(this)">
-          <label class="bk-lbl" for="bkCSV" style="background:#0a6640;">
+          <label class="bk-lbl" for="bkCSV">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
             Importar Excel/CSV
           </label>
           <input type="file" id="bkCSV" class="bk-inp" accept=".csv,.xls,.xlsx" onchange="importarCSV(this)">
-          <label class="bk-lbl" for="bkFoto" style="background:#7c3aed;">
+          <label class="bk-lbl" for="bkFoto">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
             Foto Cuaderno
           </label>
@@ -4906,14 +4981,14 @@ document.addEventListener('DOMContentLoaded',function(){
     <div class="rh">
       <h2>Registro pasajeros — INE</h2>
       <div style="display:flex;gap:7px;flex-wrap:wrap;">
-        <button class="bexp" onclick="expExcel()">Exportar Excel</button>
-        <button class="bexp" onclick="exportarBackup()" style="background:#4361ee;color:#fff;" title="Descarga un JSON completo">Backup</button>
-        <label class="bexp" style="background:#6a4c93;color:#fff;cursor:pointer;" title="Restaurar desde backup JSON">
+        <button class="bexp bexp-primary" onclick="expExcel()">Exportar Excel</button>
+        <button class="bexp" onclick="exportarBackup()" title="Descarga un JSON completo">Backup</button>
+        <label class="bexp" style="cursor:pointer;" title="Restaurar desde backup JSON">
           Restaurar
           <input type="file" accept=".json" style="display:none;" onchange="importarBackup(this)">
         </label>
-        <button class="bexp" onclick="syncBookingINE()" style="background:#003580;color:#fff;" title="Importar reservas de Booking al registro INE">Booking → INE</button>
-        <button class="bexp" onclick="syncCuadernoINE()" style="background:#5c3d1e;color:#fff;">Completar cuaderno → INE</button>
+        <button class="bexp" onclick="syncBookingINE()" style="color:#003580;border-color:#b9cbe8;" title="Importar reservas de Booking al registro INE">Booking → INE</button>
+        <button class="bexp" onclick="syncCuadernoINE()">Completar cuaderno → INE</button>
         <button class="bdng" onclick="limpiar()">Limpiar todo</button>
         <button class="papelera-btn" onclick="showPapelera()" id="btnPapeleraReg"><span id="papeleraBadgeReg"></span> Papelera</button>
       </div>
@@ -5089,6 +5164,9 @@ async function doLogin(){
     document.getElementById("loginErr").style.display = "none";
     document.title = "🏠 Dashboard — Hotel Las Vicuñas";
     doLogin._fails = 0;
+    // Intercambiar la credencial ya validada por una sesión real de Supabase
+    // (necesario desde el hardening de RLS — ver hlvEstablishSession).
+    await hlvEstablishSession({ mode:"main", username: (res.user.username||username), secret: password });
     iniciarApp(true);
   } else {
     document.getElementById("loginErr").style.display = "block";
@@ -5118,10 +5196,17 @@ function iniciarApp(admin){
   appEl.classList.add("on");
   syncDarkToggleText();
   // Copiar logo embebido al sidebar
+  // FIX estético: la clase correcta es .ls-form-logo (antes buscaba .ls-logo,
+  // que no existe → icono de imagen rota en el sidebar). _getLogoHLV() ya
+  // resuelve el logo desde cualquiera de sus ubicaciones.
   try{
-    var lsImg=document.querySelector(".ls-logo");
     var sbImg=document.getElementById("sbLogoImg");
-    if(lsImg && sbImg && lsImg.src) sbImg.src=lsImg.src;
+    var logoSrc=(typeof _getLogoHLV==="function"?_getLogoHLV():"")||
+                (document.querySelector(".ls-form-logo")||{}).src||"";
+    if(sbImg){
+      if(logoSrc){ sbImg.src=logoSrc; sbImg.style.display="block"; }
+      else sbImg.style.display="none"; // sin logo → ocultar, nunca mostrar imagen rota
+    }
   }catch(e){}
   document.getElementById("rolBadge").textContent = admin ? "Administrador" : "Solo lectura";
   document.getElementById("guestBanner").style.display = admin ? "none" : "block";
@@ -5575,13 +5660,22 @@ function hkLoginConfirm(){
   if(!pass) return;
   if(pass === HK_USERS[_hkLoginIdx].clave){
     hkUsuarioActual = HK_USERS[_hkLoginIdx].nombre;
+    // Intercambiar el PIN de Housekeeping por una sesión real de Supabase
+    // (ver hlvEstablishSession — necesario desde el hardening de RLS).
+    hlvEstablishSession({ mode:"hk", hkIndex:_hkLoginIdx, secret: pass });
     document.getElementById("hkLoginModal").remove();
     esHousekeeper = true;
     document.getElementById("loginScreen").style.display = "none";
     document.getElementById("hkApp").style.display = "block";
     document.title = hkUsuarioActual + " — Housekeeping";
-    const loginLogo = document.querySelector(".ls-logo");
-    document.getElementById("hkLogo").src = loginLogo ? loginLogo.src : "";
+    // FIX estético: clase correcta .ls-form-logo (antes .ls-logo inexistente → logo roto en HK)
+    var _hkLogoSrc=(typeof _getLogoHLV==="function"?_getLogoHLV():"")||
+                   (document.querySelector(".ls-form-logo")||{}).src||"";
+    var _hkLogoEl=document.getElementById("hkLogo");
+    if(_hkLogoEl){
+      if(_hkLogoSrc){ _hkLogoEl.src=_hkLogoSrc; _hkLogoEl.style.display=""; }
+      else _hkLogoEl.style.display="none";
+    }
     document.getElementById("hkNombre").textContent = hkUsuarioActual;
     const now = new Date();
     document.getElementById("hkFecha").textContent = now.toLocaleDateString("es-CL",{weekday:"long",day:"numeric",month:"long"});
@@ -5603,6 +5697,8 @@ function doLogoutHK(){
   document.title = "Hotel Las Vicuñas — Recepción & Housekeeping";
   document.getElementById("hkApp").style.display = "none";
   document.getElementById("loginScreen").style.display = "flex";
+  // Cerrar también la sesión de Supabase (ver authLogout).
+  try{ if(sbClient) sbClient.auth.signOut(); }catch(e){}
 }
 
 function renderHK(){
@@ -7285,7 +7381,13 @@ function rTodo(){
     const sub=subtotalHab(it);
     const mx=capMax(it.tipoIdx);
     const opts=HABS.map((hb,idx)=>`<option value="${idx}"${idx===it.tipoIdx?" selected":""}>${hn(idx)} — ${fmt(hb.precio)}/noche (base ${hb.capBase} pax)</option>`).join("");
-    const rtag=it.roomNum?`<span class="atag">🏠 Hab. ${it.roomNum} asignada</span>`:`<span class="awarn">⚠️ Sin disponibilidad en fechas seleccionadas</span>`;
+    // FIX UX: sin fechas elegidas no hay nada que advertir — mostrar hint neutro, no error rojo
+    const _fcSel=(typeof gF==="function")?gF():{i:null,o:null};
+    const rtag=it.roomNum
+      ?`<span class="atag">🏠 Hab. ${it.roomNum} asignada</span>`
+      :((_fcSel.i&&_fcSel.o)
+        ?`<span class="awarn">⚠️ Sin disponibilidad en fechas seleccionadas</span>`
+        :`<span class="atag" style="color:var(--t3);background:transparent;border:1px dashed var(--b2,#d9c9ab);">Elegí las fechas para asignar habitación</span>`);
     const adicInfo=nAdic>0?`<div style="font-size:11px;color:#b45309;margin-top:4px;">+${nAdic} pax adicional${nAdic>1?"es":""} × ${fmt(PRECIO_ADIC)}/noche = ${fmt(nAdic*PRECIO_ADIC*noches)}</div>`:"";
     const capTag=it.huespedes>=mx?`<div style="font-size:11px;color:#9d174d;margin-top:2px;">⚠️ Capacidad máxima (${mx} pax)</div>`:"";
     return `<div class="hi">
@@ -7604,9 +7706,10 @@ let vistaD="sem",baseD=(function(){const d=new Date();d.setDate(d.getDate()-(d.g
 function renderRoomLegend(){
   const el=document.getElementById("leyendaRooms");
   if(!el) return;
+  // Chips más discretos: punto de color + número, en lugar de 29 bloques saturados
   el.innerHTML="<span style='font-weight:700;color:var(--t2);font-size:11px;margin-right:4px;'>Habs:</span>"+ALL_ROOMS.map(rn=>{
     const rc=roomColor(rn);
-    return `<span title="Habitación ${rn}" style="display:inline-flex;align-items:center;gap:2px;margin:1px 3px 1px 0;background:${rc.bg};color:${rc.fg};border-radius:4px;padding:1px 5px;font-size:10px;font-weight:700;">${rn}</span>`;
+    return `<span title="Habitación ${rn}" style="display:inline-flex;align-items:center;gap:4px;margin:1px 6px 1px 0;color:var(--t2);border-radius:4px;padding:1px 2px;font-size:10px;font-weight:600;"><span style="width:8px;height:8px;border-radius:50%;background:${rc.bg};border:1px solid rgba(0,0,0,0.15);display:inline-block;"></span>${rn}</span>`;
   }).join("");
 }
 
@@ -12196,6 +12299,39 @@ function setSyncStatus(state, label){
   const hdrLbl = document.getElementById("syncLbl");
   if(dot){ dot.className = "sync-dot " + state; }
   if(hdrLbl){ hdrLbl.textContent = state==="ok"?"Sync ✓":state==="warn"?"Conectando…":"Sin sync"; }
+}
+
+// ── Auth puente: intercambia password/PIN validado localmente por una
+// sesión real de Supabase (Edge Function hlv-session). Sin esto, tras el
+// hardening de RLS (Build 20260708) la app solo puede LEER/ESCRIBIR
+// hotel_data si hay una sesión autenticada — la anon key sola ya no alcanza.
+async function hlvEstablishSession(payload){
+  try{
+    var cfg = null;
+    try{ cfg = JSON.parse(localStorage.getItem(FB_CFG_KEY)||"null"); }catch(e){}
+    if(!cfg || !cfg.url || !cfg.key) return false;
+    if(!sbClient) return false;
+    var resp = await fetch(cfg.url + "/functions/v1/hlv-session", {
+      method: "POST",
+      headers: { "Content-Type":"application/json", "Authorization":"Bearer "+cfg.key, "apikey": cfg.key },
+      body: JSON.stringify(payload)
+    });
+    var json = await resp.json().catch(()=>({ok:false,error:"bad_response"}));
+    if(!json.ok){
+      console.warn("[HLV] hlv-session rechazó la sesión:", json.error);
+      setSyncStatus("err","Sin sync");
+      return false;
+    }
+    await sbClient.auth.setSession({ access_token: json.access_token, refresh_token: json.refresh_token });
+    sbConnected = true;
+    setSyncStatus("ok","Sincronizado ✓");
+    pushLocalToSupabase();
+    setupRealtimeListeners();
+    return true;
+  }catch(e){
+    console.warn("[HLV] hlvEstablishSession error:", e);
+    return false;
+  }
 }
 
 // ── Init ─────────────────────────────────────────────────────────
